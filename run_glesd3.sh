@@ -1,18 +1,17 @@
 #!/usr/bin/env bash
 #
 # Launch openQ4 on the Doom 3-shaped OpenGL ES 3.0 back end (BE_GLES_D3),
-# through ANGLE. The renderer-gles module still compiles the ModernGL
-# translation units and BE_MODERN is still what R_PickBestBackEndRenderer
-# returns on an ES context, but that path is not brought up on ES in this tree
-# -- `r_renderer glesd3` is how the ES context is meant to be driven here, and
-# the view is rendered by src/renderer/GLES_D3/.
+# through ANGLE. This is what an ES context selects on its own, so r_renderer
+# is passed below only to pin it against a stale archived value, not because
+# the back end is opt-in.
+#
+# Startup is quick. The ModernGL executor's shader library is desktop GLSL and
+# is not brought up on ES, so ANGLE has only this back end's twelve programs to
+# translate to Metal rather than those twelve plus the executor's twenty-eight.
+# The pause that remains is on the first frame of a level.
 #
 #   ./run_glesd3.sh                       plain launch, straight to the menu
 #   ./run_glesd3.sh +map game/hangar1     extra args are passed straight through
-#
-# Expect a pause on the first frame of a level: ANGLE translates the shaders to
-# Metal up front. It is far shorter than the ModernGL path's, because this back
-# end has six programs rather than twenty-eight.
 #
 # The two runs worth comparing:
 #
