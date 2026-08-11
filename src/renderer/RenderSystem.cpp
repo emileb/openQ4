@@ -100,8 +100,7 @@ static backEndName_t R_RequestBackEndRenderer( const char *rendererName ) {
 
 #ifdef OPENQ4_RENDERER_GLES_MODULE
 	// Only the renderer-gles module compiles the GLES_D3 translation units, so
-	// the name resolves nowhere else. Opt-in only: R_PickBestBackEndRenderer
-	// never returns it, which keeps every existing ES run on BE_MODERN.
+	// the name resolves nowhere else.
 	if ( idStr::Icmp( rendererName, "glesd3" ) == 0 ) {
 		return BE_GLES_D3;
 	}
@@ -123,7 +122,17 @@ static backEndName_t R_PickBestBackEndRenderer() {
 		return BE_ARB2;
 	}
 
-	// No ARB2 -- a core or ES profile. Standalone modern is the only backend
+#ifdef OPENQ4_RENDERER_GLES_MODULE
+	// An ES profile: gles_d3 is the back end that renders here. The modern
+	// executor's shader library targets desktop GLSL and does not compile as
+	// GLSL ES, so BE_MODERN on ES draws nothing -- picking it would hand back a
+	// black frame rather than a renderer.
+	if ( glConfig.backendCaps.profile == RENDERER_CONTEXT_PROFILE_ES ) {
+		return BE_GLES_D3;
+	}
+#endif
+
+	// No ARB2 -- a desktop core profile. Standalone modern is the only backend
 	// left, and it is still better than failing to start.
 	if ( R_ModernBackEndAvailable() ) {
 		return BE_MODERN;

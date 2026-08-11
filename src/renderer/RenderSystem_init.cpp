@@ -1889,7 +1889,22 @@ void R_InitOpenGL( void ) {
 	// parse our vertex and fragment programs, possibly disably support for
 	// one of the paths if there was an error
 	R_ARB2_Init();
-	R_ModernGLExecutor_Init( glConfig.backendCaps, glConfig.renderFeatures );
+#ifdef OPENQ4_RENDERER_GLES_MODULE
+	if ( glConfig.backendCaps.profile == RENDERER_CONTEXT_PROFILE_ES ) {
+		// gles_d3 is the back end on ES, and it does not use the modern
+		// executor. The executor's shader library is desktop GLSL -- every
+		// program in it fails to compile as GLSL ES -- so bringing it up here
+		// only prints forty lines of compile errors for a path that will not
+		// run. Skip it.
+		//
+		// The GL state cache still has to come up: tr_backend drives it every
+		// frame whichever back end drew the view.
+		R_GLStateCache_Init( glConfig.backendCaps );
+	} else
+#endif
+	{
+		R_ModernGLExecutor_Init( glConfig.backendCaps, glConfig.renderFeatures );
+	}
 	RendererBootstrap_SetModernExecutorAvailable( R_ModernGLExecutor_Stats().available );
 	RendererBootstrap_FinalizeLegacyBridge( glConfig.allowARB2Path );
 	glConfig.rendererTier = RendererBootstrap_GetState().selectedTier;
