@@ -421,7 +421,17 @@ void GL_State( int stateBits ) {
 	//
 	// alpha test
 	//
-	if ( diff & GLS_ATEST_BITS ) {
+	// GL_ALPHA_TEST is fixed-function: it does not exist as an enable in any
+	// OpenGL ES profile, and glEnable/glDisable with it raises GL_INVALID_ENUM
+	// on every state change that touches these bits. glAlphaFunc is already a
+	// no-op stub on ES (GLES/gles_GLStubs.cpp), so the enable was the only half
+	// still reaching the driver -- and it was the source of a persistent
+	// GL_INVALID_ENUM that outlived every frame it was raised in, corrupting
+	// per-draw glGetError checks elsewhere.
+	//
+	// Backends without fixed-function alpha test evaluate the same state bits
+	// in the fragment shader instead (gles_d3: R_GLESD3_AlphaTestReference).
+	if ( ( diff & GLS_ATEST_BITS ) && glConfig.backendCaps.profile != RENDERER_CONTEXT_PROFILE_ES ) {
 		switch ( stateBits & GLS_ATEST_BITS ) {
 		case 0:
 			glDisable( GL_ALPHA_TEST );
@@ -543,6 +553,93 @@ RB_SwapBuffers
 
 =============
 */
+/*
+====================
+r_forceOpaquePresent
+
+idTech 4 writes MEANINGFUL alpha into the colour buffer. Every `maskcolor`
+stage does it deliberately -- the dropship hull's second stage is
+`maskcolor / map makealpha(...)`, and the HUD's ekg widget is the same -- so
+that a later stage can blend through GL_DST_ALPHA.
+
+That is harmless as long as nothing downstream believes the alpha. On the
+desktop GL path nothing does: the NSOpenGL surface is opaque and the channel
+is ignored. On the ES path ANGLE presents through a CAMetalLayer, the macOS
+compositor honours the surface alpha, and every pixel one of those stages
+touched becomes transparent -- which reads as black.
+
+The failure is invisible in a screenshot, because R_ReadTiledPixels reads
+RGBA and packs down to RGB, discarding exactly the channel that is wrong. A
+whole session of captures came back correct while the display was black.
+
+The alpha channel itself comes from SDL3_BuildFramebufferDesc
+(OpenGL/gl_ContextSDL3.cpp:342), which requests alphaBits = 8 for every
+profile including ES.
+
+Why this is fixed at PRESENT time rather than by asking for a config without
+alpha: the back buffer's alpha is load-bearing. gfx/guis/hud/ekg writes a mask
+with `maskcolor` and its second stage blends through GL_DST_ALPHA, and both
+are 2D draws to the default framebuffer, not to a render texture. Drop the
+channel and that widget blends at full strength everywhere instead of through
+its mask. The channel has to exist for the frame and be neutral only at the
+moment the compositor reads it.
+
+Cost is one alpha-only full-screen write per frame -- a masked clear, so not
+the driver's fast-clear path. At 1280x720 that is under a millisecond and it
+happens once, after all rendering. The cheaper alternatives are worse: making
+the game's final resolve emit alpha 1 would be free but depends on
+identifying that draw, and dropping the channel breaks the HUD as above.
+====================
+*/
+static idCVar r_forceOpaquePresent( "r_forceOpaquePresent", "1", CVAR_RENDERER | CVAR_BOOL,
+		"write alpha=1 over the back buffer before presenting on ES, where the compositor honours surface alpha" );
+
+static void RB_ForceOpaquePresentAlpha( void ) {
+	if ( !r_forceOpaquePresent.GetBool() ) {
+		return;
+	}
+	if ( glConfig.backendCaps.profile != RENDERER_CONTEXT_PROFILE_ES ) {
+		return;
+	}
+	// nothing to neutralise when the surface carries no alpha, and the write
+	// would be pure cost
+	if ( glConfig.alphaBits <= 0 ) {
+		return;
+	}
+
+	// The DEFAULT framebuffer specifically. Whatever the frame left bound is
+	// not necessarily it, and clearing a render texture's alpha here would
+	// both miss the fix and corrupt a buffer a later frame samples.
+	GLint previousFbo = 0;
+	glGetIntegerv( GL_FRAMEBUFFER_BINDING, &previousFbo );
+	if ( previousFbo != 0 ) {
+		glBindFramebuffer( GL_FRAMEBUFFER, 0 );
+	}
+
+	// alpha only: RGB must survive untouched, and the scissor must not clip
+	// this to whatever rect the last pass left behind
+	const bool scissorWasEnabled = glIsEnabled( GL_SCISSOR_TEST ) == GL_TRUE;
+	if ( scissorWasEnabled ) {
+		glDisable( GL_SCISSOR_TEST );
+	}
+	glColorMask( GL_FALSE, GL_FALSE, GL_FALSE, GL_TRUE );
+	glClearColor( 0.0f, 0.0f, 0.0f, 1.0f );
+	glClear( GL_COLOR_BUFFER_BIT );
+	glColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE );
+	if ( scissorWasEnabled ) {
+		glEnable( GL_SCISSOR_TEST );
+	}
+
+	if ( previousFbo != 0 ) {
+		glBindFramebuffer( GL_FRAMEBUFFER, (GLuint)previousFbo );
+	}
+
+	// glColorMask was issued behind GL_State's back, so its cached mask bits no
+	// longer describe the driver. Force the next GL_State to re-issue
+	// everything rather than delta against a stale record.
+	backEnd.glState.forceGlState = true;
+}
+
 const void	RB_SwapBuffers( const void *data ) {
 	// texture swapping test
 	if ( r_showImages.GetInteger() != 0 ) {
@@ -566,6 +663,8 @@ const void	RB_SwapBuffers( const void *data ) {
 	// Keep that buffer owned by OpenGL until R_ReadTiledPixels has copied it;
 	// presenting an EGL window surface may discard its contents immediately.
 	// All ordinary frames retain the existing presentation path.
+	RB_ForceOpaquePresentAlpha();
+
 	if ( !r_frontBuffer.GetBool() && !tr.takingScreenshot ) {
 	    GLimp_SwapBuffers();
 	}

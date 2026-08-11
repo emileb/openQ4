@@ -36,6 +36,7 @@
 
 #include "../tr_local.h"
 #include "../ShadowMapArb2Parity.h"
+#include "../GLES_D3/gles_d3_local.h"
 
 /*
 ====================
@@ -69,6 +70,13 @@ void RB_DrawView( const void *data ) {
 	}
 
 	backEnd.pc.c_surfaces += backEnd.viewDef->numDrawSurfs;
+
+	if ( RB_GLESD3_Active() ) {
+		// gles_d3 renders the view itself, the way RB_STD_DrawView does on
+		// desktop. This is the backend's only seam into the shared frame loop.
+		RB_GLESD3_DrawView();
+		return;
+	}
 
 	// The legacy scene render would run here. On ES the modern executor owns
 	// the passes; anything it does not own is simply not drawn, which is the
@@ -136,10 +144,79 @@ void R_ARB2_Init( void ) {
 	glConfig.allowARB2Path = false;
 }
 
+/*
+====================
+R_FindARBProgram
+
+Registers the program name and returns a non-zero handle. Returning 0 -- which
+this did until 2026-08-10 -- is not a harmless stub: idMaterial only allocates
+a stage's newShaderStage_t when a program handle is non-zero
+(Material.cpp:2436), so a zero handle makes the parser DISCARD the fact that
+the stage is a custom-program stage at all.
+
+The stage then looks like an ordinary textured stage to every back end in this
+module, and gets drawn as one. Measured on game/airdefense1: seven
+`gfx/effects/energy_sparks/warp_mask` stages -- authored as heatHazeWithMask
+programs sampling _currentRender -- drew as opaque black quads over the scene,
+and were invisible to the unsupported-feature counters precisely because the
+information had already been thrown away.
+
+So the handle is real and the *capability* is reported false, which is the
+honest split: the program exists as an authored asset, and this module has no
+implementation for it yet (D7). R_IsARBProgramValid answers that question, and
+the renderer skips and counts the stage instead of drawing it wrong.
+
+Mirrors what the Vulkan module does (vk_Backend.cpp:881).
+====================
+*/
+static const int GLES_MAX_MATERIAL_PROGRAMS = 256;
+static char gles_materialProgramNames[ GLES_MAX_MATERIAL_PROGRAMS ][ MAX_OSPATH ];
+static int gles_numMaterialPrograms = 0;
+
 int R_FindARBProgram( unsigned int target, const char *program ) {
 	( void )target;
-	( void )program;
-	return 0;
+	if ( program == NULL || program[0] == '\0' ) {
+		return 0;
+	}
+
+	for ( int i = 0; i < gles_numMaterialPrograms; i++ ) {
+		if ( idStr::Icmp( gles_materialProgramNames[ i ], program ) == 0 ) {
+			return i + 1;	// 1-based: 0 means "no program" to the parser
+		}
+	}
+
+	if ( gles_numMaterialPrograms >= GLES_MAX_MATERIAL_PROGRAMS ) {
+		// out of slots: fall back to the old behaviour for this one rather
+		// than hand back a handle that names the wrong program
+		return 0;
+	}
+
+	idStr::Copynz( gles_materialProgramNames[ gles_numMaterialPrograms ], program,
+			sizeof( gles_materialProgramNames[ 0 ] ) );
+	gles_numMaterialPrograms++;
+	return gles_numMaterialPrograms;
+}
+
+/*
+====================
+R_GLES_MaterialProgramName
+
+The reverse of R_FindARBProgram, for backends in this module that implement
+some of the material programs natively (GLES_D3/gles_shaderpasses.cpp, D7c).
+newShaderStage_t stores only the handle, and the handle is a slot index in the
+table above -- so without this the name the material author wrote is
+unrecoverable at draw time, and there is nothing to dispatch on.
+
+NULL for a handle this table never issued, which callers must treat as "not a
+program we implement" rather than as an error: the parser hands out handles for
+programs that exist as assets whether or not any backend can run them.
+====================
+*/
+const char *R_GLES_MaterialProgramName( int ident ) {
+	if ( ident <= 0 || ident > gles_numMaterialPrograms ) {
+		return NULL;
+	}
+	return gles_materialProgramNames[ ident - 1 ];
 }
 
 bool R_IsARBProgramValid( unsigned int target, unsigned int ident ) {

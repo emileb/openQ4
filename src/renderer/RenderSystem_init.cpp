@@ -228,7 +228,7 @@ glconfig_t	glConfig;
 
 static void GfxInfo_f( void );
 
-const char *r_rendererArgs[] = { "best", "arb2", "modern", "arb", "Cg", "exp", "nv10", "nv20", "r200", NULL };
+const char *r_rendererArgs[] = { "best", "arb2", "modern", "glesd3", "arb", "Cg", "exp", "nv10", "nv20", "r200", NULL };
 const char *r_glTierArgs[] = { "auto", "legacy", "gl33", "gl41", "gl43", "gl45", "gl46", NULL };
 const char *r_rendererBenchmarkPresetArgs[] = { "low", "baseline", "modern", "high-end", NULL };
 const char *r_multiSamplesArgs[] = { "0", "2", "4", "8", "16", NULL };
@@ -1322,7 +1322,15 @@ static void R_CheckPortableExtensions( void ) {
 	// This isn't very important, but some pathological case might cause a clamp error and give a shadow bug.
 	// Nvidia also believes that future hardware may be able to run faster with this enabled to avoid the
 	// serialization of clamping.
-	if ( R_CheckExtension( "GL_EXT_stencil_wrap" ) ) {
+	// Promoted to core in OpenGL 2.0 and in OpenGL ES 2.0, so neither a core
+	// nor an ES context advertises the extension string -- probing for it
+	// there silently selects the saturating GL_INCR/GL_DECR, which clamps
+	// nested shadow volumes and breaks the order-equivalence the two-sided
+	// single-pass stencil path depends on.
+	const bool stencilWrapIsCore =
+		glConfig.backendCaps.profile == RENDERER_CONTEXT_PROFILE_ES
+		|| glConfig.backendCaps.profile == RENDERER_CONTEXT_PROFILE_CORE;
+	if ( stencilWrapIsCore || R_CheckExtension( "GL_EXT_stencil_wrap" ) ) {
 		tr.stencilIncr = GL_INCR_WRAP_EXT;
 		tr.stencilDecr = GL_DECR_WRAP_EXT;
 	} else {
@@ -2531,6 +2539,33 @@ tiling it into window-sized chunks and rendering each chunk separately
 If ref isn't specified, the full session UpdateScreen will be done.
 ====================
 */
+/*
+====================
+r_screenshotKeepScissor
+
+A screenshot is a RE-RENDER, not a copy of the frame on screen, and the
+capture below turns the scissor off before producing it. Any defect that
+depends on scissor state is therefore structurally invisible in a screenshot:
+the image comes back correct while the display is wrong.
+
+A capture therefore cannot be trusted to reproduce a scissor-dependent fault.
+
+Note this was NOT the cause of the black surfaces reported during the gles_d3
+bring-up, though it was suspected at the time. Those captures came back
+correct for a different reason in the same family: the readback below reads
+GL_RGBA and packs down to RGB, discarding alpha, and the fault was in the
+alpha channel (see RB_ForceOpaquePresentAlpha, tr_backend.cpp). Two
+independent ways for a screenshot to disagree with the display, which is why
+this one is worth having even though it did not find that bug.
+
+Set this to keep the scissor exactly as the frame loop had it. Default 0, the
+historical behaviour, because leaving it on makes tiled (larger-than-screen)
+captures responsible for their own scissor rects, which they are not.
+====================
+*/
+idCVar r_screenshotKeepScissor( "r_screenshotKeepScissor", "0", CVAR_RENDERER | CVAR_BOOL,
+		"screenshots re-render with the scissor left as the frame loop set it, so scissor-dependent faults are visible in a capture" );
+
 void R_ReadTiledPixels( int width, int height, byte *buffer, renderView_t *ref = NULL ) {
 	// include extra space for OpenGL padding to word boundaries
 	byte	*temp = (byte *)R_StaticAlloc( (glConfig.vidWidth+3) * glConfig.vidHeight * 3 );
@@ -2553,7 +2588,10 @@ void R_ReadTiledPixels( int width, int height, byte *buffer, renderView_t *ref =
 	tr.tiledViewport[1] = height;
 
 	// disable scissor, so we don't need to adjust all those rects
-	r_useScissor.SetBool( false );
+	const bool overrideScissor = !r_screenshotKeepScissor.GetBool();
+	if ( overrideScissor ) {
+		r_useScissor.SetBool( false );
+	}
 
 	for ( int xo = 0 ; xo < width ; xo += oldWidth ) {
 		for ( int yo = 0 ; yo < height ; yo += oldHeight ) {
@@ -2630,7 +2668,10 @@ void R_ReadTiledPixels( int width, int height, byte *buffer, renderView_t *ref =
 		}
 	}
 
-	r_useScissor.SetBool( oldUseScissor );
+	// restore only what we overrode, and to what the player actually had
+	if ( overrideScissor ) {
+		r_useScissor.SetBool( oldUseScissor );
+	}
 
 	tr.viewportOffset[0] = 0;
 	tr.viewportOffset[1] = 0;

@@ -52,6 +52,8 @@ static const char *R_GetBackEndRendererName( backEndName_t renderer ) {
 			return "ARB2";
 		case BE_MODERN:
 			return "Modern";
+		case BE_GLES_D3:
+			return "GLESD3";
 		default:
 			return "BAD";
 	}
@@ -96,6 +98,15 @@ static backEndName_t R_RequestBackEndRenderer( const char *rendererName ) {
 	if ( idStr::Icmp( rendererName, "modern" ) == 0 ) {
 		return R_ModernBackEndAvailable() ? BE_MODERN : BE_BAD;
 	}
+
+#ifdef OPENQ4_RENDERER_GLES_MODULE
+	// Only the renderer-gles module compiles the GLES_D3 translation units, so
+	// the name resolves nowhere else. Opt-in only: R_PickBestBackEndRenderer
+	// never returns it, which keeps every existing ES run on BE_MODERN.
+	if ( idStr::Icmp( rendererName, "glesd3" ) == 0 ) {
+		return BE_GLES_D3;
+	}
+#endif
 
 	return BE_BAD;
 }
@@ -1281,6 +1292,13 @@ void idRenderSystemLocal::SetBackEndRenderer() {
 		// vertex programs -- do not exist here. The flag drives interaction
 		// data layout and vertex-cache invalidation, and the modern executor
 		// builds its own vertex input, so it stays false.
+		backEndRendererHasVertexPrograms = false;
+		backEndRendererMaxLight = 999;
+		break;
+	case BE_GLES_D3:
+		common->Printf( "using Doom 3-shaped GLES 3.0 renderSystem (gles_d3)\n" );
+		// Same reasoning as BE_MODERN: no ARB assembly vertex programs exist on
+		// an ES context, and this backend builds its own vertex input.
 		backEndRendererHasVertexPrograms = false;
 		backEndRendererMaxLight = 999;
 		break;
