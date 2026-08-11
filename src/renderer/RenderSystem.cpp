@@ -30,6 +30,7 @@ If you have questions concerning this license or the applicable additional terms
 
 #include "tr_local.h"
 #include "Model_local.h"
+#include "ModernGLExecutor.h"
 #include "RendererMetrics.h"
 #include "RendererUpload.h"
 #include "ScenePackets.h"
@@ -49,6 +50,8 @@ static const char *R_GetBackEndRendererName( backEndName_t renderer ) {
 	switch ( renderer ) {
 		case BE_ARB2:
 			return "ARB2";
+		case BE_MODERN:
+			return "Modern";
 		default:
 			return "BAD";
 	}
@@ -77,6 +80,10 @@ static bool R_IsLegacyBackEndRequest( const char *rendererName ) {
 R_RequestBackEndRenderer
 ==============================
 */
+static bool R_ModernBackEndAvailable( void ) {
+	return R_ModernGLExecutor_Stats().available;
+}
+
 static backEndName_t R_RequestBackEndRenderer( const char *rendererName ) {
 	if ( rendererName == NULL || rendererName[0] == '\0' || idStr::Icmp( rendererName, "best" ) == 0 ) {
 		return BE_BAD;
@@ -84,6 +91,10 @@ static backEndName_t R_RequestBackEndRenderer( const char *rendererName ) {
 
 	if ( idStr::Icmp( rendererName, "arb2" ) == 0 ) {
 		return glConfig.allowARB2Path ? BE_ARB2 : BE_BAD;
+	}
+
+	if ( idStr::Icmp( rendererName, "modern" ) == 0 ) {
+		return R_ModernBackEndAvailable() ? BE_MODERN : BE_BAD;
 	}
 
 	return BE_BAD;
@@ -95,8 +106,17 @@ R_PickBestBackEndRenderer
 ===============================
 */
 static backEndName_t R_PickBestBackEndRenderer() {
+	// ARB2 stays the automatic choice wherever it exists. The modern executor
+	// is layered over it there and gives up passes it cannot own, which is a
+	// strictly better frame than the standalone backend can produce today.
 	if ( glConfig.allowARB2Path ) {
 		return BE_ARB2;
+	}
+
+	// No ARB2 -- a core or ES profile. Standalone modern is the only backend
+	// left, and it is still better than failing to start.
+	if ( R_ModernBackEndAvailable() ) {
+		return BE_MODERN;
 	}
 
 	return BE_BAD;
@@ -1254,6 +1274,15 @@ void idRenderSystemLocal::SetBackEndRenderer() {
 		if ( !glConfig.preferSimpleLighting ) {
 			r_lightDetailLevel.SetFloat( 0.0f );
 		}
+		break;
+	case BE_MODERN:
+		common->Printf( "using standalone modern renderSystem (no ARB2 bridge)\n" );
+		// Vertex programs in the sense the legacy path means -- ARB assembly
+		// vertex programs -- do not exist here. The flag drives interaction
+		// data layout and vertex-cache invalidation, and the modern executor
+		// builds its own vertex input, so it stays false.
+		backEndRendererHasVertexPrograms = false;
+		backEndRendererMaxLight = 999;
 		break;
 	default:
 		common->FatalError( "SetbackEndRenderer: bad back end" );

@@ -1582,7 +1582,19 @@ endif
 renderer_vk_binary_name = 'renderer-vk_' + binary_arch
 
 renderer_gl_binary_name = 'renderer-gl_' + binary_arch
-if build_engine and (build_renderer_gl or build_renderer_vk)
+
+# Experimental OpenGL ES renderer module (Android backend bring-up).
+# Local development only: it needs an ANGLE staged by tools/build/prepare_macos_angle.sh, which is sourced from an
+# installed Google Chrome and is not redistributable. Never installed.
+renderer_gles_binary_name = 'renderer-gles_' + binary_arch
+angle_staged_dir = meson.project_source_root() / '.tmp' / 'angle-macos'
+angle_gles_lib = disabler()
+build_renderer_gles = false
+if host_system == 'darwin' and use_sdl3_backend and build_engine
+  angle_gles_lib = cpp.find_library('GLESv2', dirs: [angle_staged_dir], required: false)
+  build_renderer_gles = angle_gles_lib.found()
+endif
+if build_engine and (build_renderer_gl or build_renderer_vk or build_renderer_gles)
   # the modules' own idlib copy, compiled with engine flavor so codegen and
   # interface layout match the renderer sources
   renderer_idlib_library = static_library(
@@ -1641,6 +1653,103 @@ if build_renderer_gl and build_engine
     name_prefix: '',
     install: true,
     install_dir: install_root_dir,
+  )
+endif
+
+# Experimental macOS OpenGL ES clear probe (Android GLES backend bring-up).
+#
+# openQ4's GL 1.x entry points bind at link time, so on macOS they resolve from
+# OpenGL.framework and an EGL/ANGLE ES context is never actually driven. This
+# target is the minimal proof of the opposite arrangement: link ANGLE's
+# libGLESv2 and no desktop GL, then clear and present through it. It is the
+# link-shape a future renderer-gles module has to use.
+#
+# Local development only: it needs an ANGLE staged by
+# tools/build/prepare_macos_angle.sh and is never installed or packaged.
+build_gles_probe = host_system == 'darwin' and use_sdl3_backend and build_engine
+if build_gles_probe
+  if not angle_gles_lib.found()
+    warning('ANGLE not staged; skipping the GLES clear probe. Run tools/build/prepare_macos_angle.sh to enable it.')
+  else
+    executable(
+      'openq4-gles-probe',
+      files('src/renderer/GLES/gles_clear_probe.cpp'),
+      include_directories: engine_include_dirs,
+      dependencies: [sdl3_dep, angle_gles_lib],
+      cpp_args: engine_cpp_args,
+      # @loader_path so the staged ANGLE resolves next to the probe binary,
+      # matching how a shipped module would find its own runtime.
+      link_args: ['-Wl,-rpath,@loader_path'],
+      install: false,
+    )
+  endif
+endif
+
+# Experimental OpenGL ES renderer module.
+#
+# The shared renderer front-end again, but with GL resolved through
+# renderer/GLES/qgl_gles.h against a real ES driver instead of GLEW against
+# desktop GL. Unlike renderer-vk this KEEPS the ModernGL translation units --
+# GLES is still GL, so the executor, shader library, state cache, upload
+# manager and render-graph resources are reused rather than rewritten -- and
+# keeps tr_backend.cpp, whose five references into the dropped legacy TUs are
+# supplied by renderer/GLES/gles_Backend.cpp.
+#
+# Never installed: the ANGLE it links is a local development aid.
+if build_renderer_gles
+  renderer_gles_source_discovery = run_command(
+    py,
+    meson.project_source_root() / 'tools' / 'build' / 'meson_sources.py',
+    '--emit',
+    'renderer_gles',
+    check: true,
+  )
+  renderer_gles_source_paths = renderer_gles_source_discovery.stdout().strip().split('\n')
+  if renderer_gles_source_paths.length() == 0
+    error('tools/build/meson_sources.py returned no renderer_gles source files.')
+  endif
+  renderer_gles_sources = files(renderer_gles_source_paths)
+
+  renderer_gles_module_args = engine_cpp_args + [
+    '-DOPENQ4_RENDERER_MODULE',
+    '-DOPENQ4_RENDERER_GLES_MODULE',
+    '-DOPENQ4_SDL3_CONTEXT_IMPL',
+    '-DOPENQ4_RENDERER_BACKEND_NAME="gles"',
+    '-DOPENQ4_RENDERER_BACKEND_DESC="openQ4 OpenGL ES renderer module"',
+  ]
+
+  renderer_gles_export_list = files('tools/build/macos_renderer_module.exp')
+  renderer_gles_link_args = [
+    '-Wl,-exported_symbols_list,' + renderer_gles_export_list[0].full_path(),
+    '-Wl,-dead_strip',
+    '-Wl,-headerpad_max_install_names',
+    '-Wl,-install_name,@loader_path/' + renderer_gles_binary_name + '.dylib',
+    # the staged ANGLE sits next to the binary, matching the clear probe
+    '-Wl,-rpath,@loader_path',
+  ]
+
+  # shared_library, not shared_module: meson links shared_module on darwin as an
+  # MH_BUNDLE with -undefined dynamic_lookup, which drops the undefined-symbol
+  # closure. That closure is the point here -- it is what proves the module has
+  # no desktop GL left in it.
+  renderer_gles_module_target = shared_library(
+    renderer_gles_binary_name,
+    renderer_gles_sources,
+    include_directories: [
+      engine_include_dirs,
+      include_directories('src/external/gles'),
+    ],
+    cpp_args: renderer_gles_module_args,
+    c_args: engine_c_args,
+    cpp_pch: pch_headers,
+    link_with: [renderer_idlib_library, imagetools_library, render_geo_library],
+    dependencies: [angle_gles_lib],
+    link_args: renderer_gles_link_args,
+    link_depends: renderer_gles_export_list,
+    gnu_symbol_visibility: 'hidden',
+    name_prefix: '',
+    name_suffix: 'dylib',
+    install: false,
   )
 endif
 

@@ -134,6 +134,33 @@ RENDERER_VK_EXCLUDED_SOURCES = (
     "src/renderer/RendererUpload.cpp",
 )
 
+# renderer sources for the renderer-gles dynamic module: the shared front-end
+# plus renderer/GLES/*, minus the loader and the fixed-function draw paths.
+#
+# Differs from renderer_vk in two ways that are the whole point of the module:
+#   - the ModernGL translation units are KEPT, not replaced. GLES is still GL,
+#     so ModernGLExecutor, the shader library, the state cache, the upload
+#     manager and the render-graph resources are reused as-is.
+#   - tr_backend.cpp is KEPT. Measured with nm, it references only five symbols
+#     from the dropped TUs, supplied by renderer/GLES/gles_Backend.cpp, so the
+#     module reuses the real frame loop instead of writing its own.
+RENDERER_GLES_SOURCE_GLOBS = [
+    "renderer/*.cpp",
+    "renderer/OpenGL/*.cpp",
+    "renderer/GLES/*.cpp",
+]
+
+RENDERER_GLES_EXCLUDED_SOURCES = (
+    "src/renderer/RendererModule.cpp",
+    # fixed-function and ARB-assembly draw paths; no ES equivalent at any version
+    "src/renderer/draw_arb2.cpp",
+    "src/renderer/draw_common.cpp",
+    "src/renderer/tr_render.cpp",
+    "src/renderer/tr_rendertools.cpp",
+    # the standalone clear probe is its own executable, not part of the module
+    "src/renderer/GLES/gles_clear_probe.cpp",
+)
+
 GAME_SOURCE_GLOBS = [
     "game/ai/*.cpp",
     "game/anim/*.cpp",
@@ -318,7 +345,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument(
         "--emit",
-        choices=("engine", "imagetools", "render_geo", "renderer_gl", "renderer_vk"),
+        choices=("engine", "imagetools", "render_geo", "renderer_gl", "renderer_vk", "renderer_gles"),
         default="engine",
         help="Emit engine target sources or one of the split library/module source lists.",
     )
@@ -350,12 +377,13 @@ def main(argv: list[str]) -> int:
 
     include_game = args.include_game == "true"
 
-    if args.emit in ("imagetools", "render_geo", "renderer_gl", "renderer_vk"):
+    if args.emit in ("imagetools", "render_geo", "renderer_gl", "renderer_vk", "renderer_gles"):
         globs = {
             "imagetools": IMAGETOOLS_SOURCE_GLOBS,
             "render_geo": RENDER_GEO_SOURCE_GLOBS,
             "renderer_gl": RENDERER_GL_SOURCE_GLOBS,
             "renderer_vk": RENDERER_VK_SOURCE_GLOBS,
+            "renderer_gles": RENDERER_GLES_SOURCE_GLOBS,
         }[args.emit]
         try:
             for pattern in globs:
@@ -365,6 +393,9 @@ def main(argv: list[str]) -> int:
             return 1
         if args.emit == "renderer_gl":
             for path in RENDERER_GL_EXCLUDED_SOURCES:
+                remove_source(source_set, ordered_sources, path)
+        if args.emit == "renderer_gles":
+            for path in RENDERER_GLES_EXCLUDED_SOURCES:
                 remove_source(source_set, ordered_sources, path)
         if args.emit == "renderer_vk":
             try:

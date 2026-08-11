@@ -98,6 +98,17 @@ static void R_RecordMissingRequiredOpenGLFeature( const char *name ) {
 static bool R_CheckRequiredExtension( const char *name ) {
 	const bool available = R_CheckExtension( const_cast<char *>( name ) );
 	if ( !available ) {
+		// These "required" features are the fixed-function and ARB-assembly
+		// extensions the legacy ARB2 path is built on. A profile that removed
+		// fixed-function cannot report them by definition, so their absence is
+		// expected rather than fatal: such a context is served by the modern
+		// programmable path, and RendererCaps_SupportsTier already refuses the
+		// legacy tier for it. Applies to OpenGL ES at any version and to a
+		// desktop core profile.
+		if ( glConfig.backendCaps.profile == RENDERER_CONTEXT_PROFILE_ES
+			|| glConfig.backendCaps.profile == RENDERER_CONTEXT_PROFILE_CORE ) {
+			return false;
+		}
 		R_RecordMissingRequiredOpenGLFeature( name );
 	}
 	return available;
@@ -217,7 +228,7 @@ glconfig_t	glConfig;
 
 static void GfxInfo_f( void );
 
-const char *r_rendererArgs[] = { "best", "arb", "arb2", "Cg", "exp", "nv10", "nv20", "r200", NULL };
+const char *r_rendererArgs[] = { "best", "arb2", "modern", "arb", "Cg", "exp", "nv10", "nv20", "r200", NULL };
 const char *r_glTierArgs[] = { "auto", "legacy", "gl33", "gl41", "gl43", "gl45", "gl46", NULL };
 const char *r_rendererBenchmarkPresetArgs[] = { "low", "baseline", "modern", "high-end", NULL };
 const char *r_multiSamplesArgs[] = { "0", "2", "4", "8", "16", NULL };
@@ -466,6 +477,8 @@ idCVar r_brightness( "r_brightness", "1", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_FL
 idCVar r_renderer( "r_renderer", "best", CVAR_RENDERER | CVAR_ARCHIVE, "hardware specific renderer path to use", r_rendererArgs, idCmdSystem::ArgCompletion_String<r_rendererArgs> );
 idCVar r_actualRenderer( "r_actualRenderer", "UNINITIALIZED", CVAR_RENDERER | CVAR_ROM, "actual active renderer backend after request/fallback selection" );
 idCVar r_glTier( "r_glTier", "auto", CVAR_RENDERER | CVAR_ARCHIVE, "OpenGL renderer tier: auto, legacy, gl33, gl41, gl43, gl45, gl46", r_glTierArgs, idCmdSystem::ArgCompletion_String<r_glTierArgs> );
+idCVar r_glesContext( "r_glesContext", "0", CVAR_RENDERER | CVAR_BOOL | CVAR_ARCHIVE, "request an OpenGL ES 3.0 context instead of desktop GL; bring-up aid for the Android GLES backend, on desktop this needs an EGL/GLES translation layer (ANGLE)" );
+idCVar r_glCoreProfileFirst( "r_glCoreProfileFirst", "0", CVAR_RENDERER | CVAR_BOOL, "with a forced r_glTier, try core-profile contexts before the compatibility fallback; needed to reach the modern path on drivers that cap compatibility below 3.3 (macOS caps it at 2.1), diagnostic only" );
 idCVar r_vkValidation( "r_vkValidation", "0", CVAR_RENDERER | CVAR_BOOL, "enable Vulkan validation layers for the Vulkan renderer module and rendererVkProbe" );
 idCVar r_vkDevice( "r_vkDevice", "-1", CVAR_RENDERER | CVAR_INTEGER, "Vulkan physical-device index override, -1 = automatic selection", -1, 15 );
 idCVar r_vkShadowFallbackTest( "r_vkShadowFallbackTest", "0", CVAR_RENDERER | CVAR_BOOL, "diagnostic: make Vulkan shadow maps and stencil ownership unavailable to exercise unshadowed receiver fallback" );
@@ -1151,6 +1164,18 @@ static void R_CheckPortableExtensions( void ) {
 	GLCapabilityProbe_Build( glConfig.backendCaps, glConfig.version_string, glConfig.extensions_string );
 	glConfig.extensions_string = GLCapabilityProbe_ExtensionString();
 
+	// The atof() above cannot read an "OpenGL ES <n>.<n> ..." version string
+	// and leaves 0.0 behind. The probe parses both spellings, so adopt its
+	// result now that it has run.
+	glConfig.glVersion = glConfig.backendCaps.glVersion;
+
+	// A profile with no fixed-function stage: desktop core, or OpenGL ES at any
+	// version. Several checks below are written against compatibility-only
+	// extension strings and enums, which such a profile cannot answer.
+	const bool programmableOnlyProfile =
+		glConfig.backendCaps.profile == RENDERER_CONTEXT_PROFILE_ES
+		|| glConfig.backendCaps.profile == RENDERER_CONTEXT_PROFILE_CORE;
+
 	// GL_ARB_multitexture
 	glConfig.multitextureAvailable = R_CheckRequiredExtension( "GL_ARB_multitexture" );
 	if ( glConfig.multitextureAvailable && !R_HasARBMultitextureEntryPoints() ) {
@@ -1169,6 +1194,24 @@ static void R_CheckPortableExtensions( void ) {
 		}
 		glGetIntegerv(GL_MAX_TEXTURE_COORDS_ARB, (GLint*)&glConfig.maxTextureCoords);
 		glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS_ARB, (GLint*)&glConfig.maxTextureImageUnits);
+	} else if ( programmableOnlyProfile ) {
+		// GL_ARB_multitexture is compatibility-only, so the block above never
+		// runs here and every limit would stay 0 -- which makes GL_SelectTexture
+		// and idImage::Bind reject every unit and the frame comes out black.
+		// GL_MAX_TEXTURE_IMAGE_UNITS is the core query and is what actually
+		// bounds a fragment shader's samplers. GL_MAX_TEXTURE_UNITS and
+		// GL_MAX_TEXTURE_COORDS describe fixed-function stages that do not
+		// exist, so mirror the image-unit count rather than querying them.
+		glGetIntegerv( GL_MAX_TEXTURE_IMAGE_UNITS, (GLint *)&glConfig.maxTextureImageUnits );
+		if ( glConfig.maxTextureImageUnits <= 0 ) {
+			glConfig.maxTextureImageUnits = 16;		// the ES 3.0 / GL 3.3 floor
+		}
+		if ( glConfig.maxTextureImageUnits > MAX_MULTITEXTURE_UNITS ) {
+			glConfig.maxTextureImageUnits = MAX_MULTITEXTURE_UNITS;
+		}
+		glConfig.maxTextureUnits = glConfig.maxTextureImageUnits;
+		glConfig.maxTextureCoords = glConfig.maxTextureImageUnits;
+		glConfig.multitextureAvailable = true;
 	}
 
 	glConfig.maxDrawBuffers = 1;
@@ -1211,7 +1254,22 @@ static void R_CheckPortableExtensions( void ) {
 		common->Printf( "X..texture compression entry points incomplete\n" );
 	}
 	const bool textureCompressionAvailable = textureCompressionAdvertised && textureCompressionEntryPointsAvailable;
-	if ( textureCompressionAvailable && R_CheckExtension( "GL_EXT_texture_compression_s3tc" ) ) {
+	// OpenGL ES never advertises GL_EXT_texture_compression_s3tc. ANGLE splits the
+	// same formats across GL_EXT_texture_compression_dxt1 (which defines both the
+	// RGB and RGBA DXT1 tokens) and GL_ANGLE_texture_compression_dxt5, and only
+	// offers the sRGB variant under the s3tc name. The engine uploads exactly
+	// GL_COMPRESSED_RGBA_S3TC_DXT1_EXT and GL_COMPRESSED_RGBA_S3TC_DXT5_EXT, so
+	// those two extensions cover everything FMT_DXT1/FMT_DXT5 need.
+	//
+	// Getting this wrong is not a quiet quality downgrade: a rejected DXT header
+	// makes R_BinaryImageHeaderSupportedByRenderer fail, so every precompressed
+	// image is regenerated from source art as FMT_RGB565 -- slowly, and lazily
+	// enough that placeholders are visible until a level load completes.
+	const bool s3tcSpelled = R_CheckExtension( "GL_EXT_texture_compression_s3tc" );
+	const bool dxtSpelledSeparately =
+		R_CheckExtension( "GL_EXT_texture_compression_dxt1" ) &&
+		R_CheckExtension( "GL_ANGLE_texture_compression_dxt5" );
+	if ( textureCompressionAvailable && ( s3tcSpelled || dxtSpelledSeparately ) ) {
 		glConfig.textureCompressionAvailable = true;
 	} else {
 		glConfig.textureCompressionAvailable = false;
@@ -1313,6 +1371,15 @@ static void R_CheckPortableExtensions( void ) {
 
 	// ARB_vertex_buffer_object
 	glConfig.ARBVertexBufferObjectAvailable = R_CheckExtension( "GL_ARB_vertex_buffer_object" );
+	if ( !glConfig.ARBVertexBufferObjectAvailable && programmableOnlyProfile ) {
+		// Buffer objects are core since GL 1.5 and ES 2.0, so the extension
+		// string is absent on these profiles and the probe above finds nothing.
+		// Believing it drops the engine onto the virtual-memory vertex cache
+		// ("Vertex cache is SLOW"), which leaves every ambientCache->vbo at 0.
+		// Every scene surface then fails the modern geometry path with
+		// MISSING_VERTEX_BUFFER: measured on game/mcc_1, 654 of ~662 draws.
+		glConfig.ARBVertexBufferObjectAvailable = true;
+	}
 	if ( glConfig.ARBVertexBufferObjectAvailable && !R_HasARBVertexBufferObjectEntryPoints() ) {
 		common->Printf( "X..GL_ARB_vertex_buffer_object entry points incomplete; using virtual-memory vertex cache\n" );
 		glConfig.ARBVertexBufferObjectAvailable = false;
@@ -1366,8 +1433,14 @@ static void R_CheckPortableExtensions( void ) {
 	}
 
 	// check for minimum set
-	if ( !glConfig.multitextureAvailable || !glConfig.textureEnvCombineAvailable || !glConfig.cubeMapAvailable
-		|| !glConfig.envDot3Available ) {
+	//
+	// This minimum is the legacy ARB2 path's, expressed as compatibility-only
+	// extension strings. A profile without fixed-function cannot report them,
+	// so the check is meaningless there and would fail a context the modern
+	// path is perfectly able to drive -- see R_CheckRequiredExtension.
+	if ( !programmableOnlyProfile
+		&& ( !glConfig.multitextureAvailable || !glConfig.textureEnvCombineAvailable || !glConfig.cubeMapAvailable
+		|| !glConfig.envDot3Available ) ) {
 			R_ErrorForMissingRequiredOpenGLFeatures();
 	}
 
@@ -1382,9 +1455,16 @@ static void R_CheckPortableExtensions( void ) {
 	glConfig.backendCaps.maxColorAttachments = glConfig.maxColorAttachments;
 	glConfig.backendCaps.hasARBVertexProgram = glConfig.ARBVertexProgramAvailable;
 	glConfig.backendCaps.hasARBFragmentProgram = glConfig.ARBFragmentProgramAvailable;
-	glConfig.backendCaps.hasVBO = glConfig.ARBVertexBufferObjectAvailable;
-	glConfig.backendCaps.hasPBO = glConfig.pixelBufferObjectAvailable;
-	glConfig.backendCaps.hasGLSL = glConfig.GLSLProgramAvailable;
+	if ( !programmableOnlyProfile ) {
+		// These mirror the compatibility-only extension strings back into the
+		// caps. On a core or ES profile those strings are absent for features
+		// that are core, so copying them here would undo what the capability
+		// probe already worked out from the version -- and a 4.1 core context
+		// would report VBO:0 GLSL:0 and drop to NullRenderer.
+		glConfig.backendCaps.hasVBO = glConfig.ARBVertexBufferObjectAvailable;
+		glConfig.backendCaps.hasPBO = glConfig.pixelBufferObjectAvailable;
+		glConfig.backendCaps.hasGLSL = glConfig.GLSLProgramAvailable;
+	}
 	glConfig.backendCaps.hasSRGBTextures = glConfig.textureSRGBAvailable;
 	glConfig.backendCaps.hasFramebufferSRGB = glConfig.framebufferSRGBAvailable;
 	glConfig.backendCaps.hasMRT = glConfig.maxDrawBuffers >= 4 && glConfig.maxColorAttachments >= 4;
@@ -1948,13 +2028,30 @@ void R_InitOpenGL( void ) {
 	RendererBootstrap_FinalizeLegacyBridge( glConfig.allowARB2Path );
 	glConfig.rendererTier = RendererBootstrap_GetState().selectedTier;
 	glConfig.renderFeatures = RendererBootstrap_GetState().features;
-	// ARB2 is only *required* while it is the renderer that draws. Once the
-	// modern visible path is promoted it can own the frame without the
-	// compatibility bridge, so a context that cannot host ARB2 stops being
-	// fatal. While no parity contract is proven the promotion state is false,
-	// which keeps this exactly as strict as before.
-	if ( !glConfig.allowARB2Path && !RendererBootstrap_ShouldAutoPromoteModernVisible() ) {
+	// The ARB2 bridge is a hard requirement on a compatibility context: the
+	// modern executor only *owns* the passes it has claimed and the legacy path
+	// renders the rest, so losing ARB2 there means losing most of the frame.
+	// Two independent escapes from that requirement:
+	//   - a programmable-only profile (core or ES) has no ARB2 by construction;
+	//     erroring out would make such a context unusable no matter how capable
+	//     it is, and letting it through is what exposes the modern path's
+	//     standalone coverage
+	//   - once the modern visible path is promoted it can own the frame without
+	//     the compatibility bridge (upstream); while no parity contract is
+	//     proven the promotion state is false, keeping this exactly as strict
+	//     as before
+	const bool programmableOnlyProfile =
+		glConfig.backendCaps.profile == RENDERER_CONTEXT_PROFILE_ES
+		|| glConfig.backendCaps.profile == RENDERER_CONTEXT_PROFILE_CORE;
+	if ( !glConfig.allowARB2Path && !programmableOnlyProfile
+			&& !RendererBootstrap_ShouldAutoPromoteModernVisible() ) {
 		R_ErrorForMissingRequiredOpenGLFeatures();
+	}
+	if ( !glConfig.allowARB2Path && programmableOnlyProfile ) {
+		common->Printf(
+			"Renderer: no ARB2 bridge on a %s profile; the modern executor renders standalone "
+			"and any pass it does not own will be missing\n",
+			RendererContextProfile_Name( glConfig.backendCaps.profile ) );
 	}
 	R_RenderGraphResources_Init( glConfig.backendCaps, glConfig.renderFeatures );
 	R_MaterialResourceTable_Init( glConfig.backendCaps, glConfig.renderFeatures );
@@ -2438,6 +2535,16 @@ void R_ReadTiledPixels( int width, int height, byte *buffer, renderView_t *ref =
 	// include extra space for OpenGL padding to word boundaries
 	byte	*temp = (byte *)R_StaticAlloc( (glConfig.vidWidth+3) * glConfig.vidHeight * 3 );
 
+	// OpenGL ES guarantees exactly one glReadPixels format for the default
+	// framebuffer -- GL_RGBA/GL_UNSIGNED_BYTE -- plus an implementation-defined
+	// pair reported by GL_IMPLEMENTATION_COLOR_READ_FORMAT. ANGLE reports RGBA
+	// and rejects the GL_RGB read this function used to issue, which failed with
+	// GL_INVALID_OPERATION and left the destination untouched: every ES
+	// screenshot came out uniformly black while the frame on screen was fine.
+	// RGBA is equally valid on desktop GL, so read RGBA everywhere and pack down
+	// rather than branching per backend.
+	byte	*rgbaTemp = (byte *)R_StaticAlloc( (glConfig.vidWidth+3) * glConfig.vidHeight * 4 );
+
 	int	oldWidth = glConfig.vidWidth;
 	int oldHeight = glConfig.vidHeight;
 	const bool oldUseScissor = r_useScissor.GetBool();
@@ -2495,7 +2602,24 @@ void R_ReadTiledPixels( int width, int height, byte *buffer, renderView_t *ref =
 				h = height - yo;
 			}
 
-			glReadPixels( 0, 0, w, h, GL_RGB, GL_UNSIGNED_BYTE, temp ); 
+			// The frame was produced by commands that may still be queued. A
+			// desktop driver generally resolves that implicitly, but ANGLE's
+			// Metal backend hands back an empty default framebuffer unless the
+			// work is forced to complete first -- which is why ES screenshots
+			// came out uniformly black while the frame on screen was correct.
+			glReadPixels( 0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, rgbaTemp );
+
+			const int rgbaRow = ( w * 4 + 3 ) & ~3;
+			const int rgbRow = ( w * 3 + 3 ) & ~3;
+			for ( int y = 0; y < h; y++ ) {
+				const byte *src = rgbaTemp + y * rgbaRow;
+				byte *dst = temp + y * rgbRow;
+				for ( int x = 0; x < w; x++ ) {
+					dst[x * 3 + 0] = src[x * 4 + 0];
+					dst[x * 3 + 1] = src[x * 4 + 1];
+					dst[x * 3 + 2] = src[x * 4 + 2];
+				}
+			}
 
 			int	row = ( w * 3 + 3 ) & ~3;		// OpenGL pads to dword boundaries
 
@@ -2514,6 +2638,7 @@ void R_ReadTiledPixels( int width, int height, byte *buffer, renderView_t *ref =
 	tr.tiledViewport[1] = 0;
 
 	R_StaticFree( temp );
+	R_StaticFree( rgbaTemp );
 
 	glConfig.vidWidth = oldWidth;
 	glConfig.vidHeight = oldHeight;
