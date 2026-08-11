@@ -777,19 +777,35 @@ void idImage::Bind() {
 	tmu_t* tmu = &backEnd.glState.tmu[texUnit];
 
 	// enable or disable apropriate texture modes
+	//
+	// GL_TEXTURE_2D and GL_TEXTURE_CUBE_MAP are fixed-function texture-target
+	// enables: they select which target the fixed-function fragment stage
+	// samples, and they do not exist as enables in an ES or core profile,
+	// where the shader names its own sampler. glEnable/glDisable with them
+	// raises GL_INVALID_ENUM on every texture-type transition -- measured on
+	// ES as a persistent error that outlived the frame raising it and
+	// corrupted per-draw glGetError checks in the back end.
+	//
+	// The bookkeeping still runs on every profile; only the two calls that
+	// reach the driver are gated.
 	if (tmu->textureType != opts.textureType && (backEnd.glState.currenttmu < glConfig.maxTextureUnits)) {
-		if (tmu->textureType == TT_CUBIC) {
-			glDisable(GL_TEXTURE_CUBE_MAP_EXT);
-		}
-		else if (tmu->textureType == TT_2D) {
-			glDisable(GL_TEXTURE_2D);
-		}
+		const bool hasFixedFunctionTextureEnables =
+			glConfig.backendCaps.profile != RENDERER_CONTEXT_PROFILE_ES
+			&& glConfig.backendCaps.profile != RENDERER_CONTEXT_PROFILE_CORE;
+		if (hasFixedFunctionTextureEnables) {
+			if (tmu->textureType == TT_CUBIC) {
+				glDisable(GL_TEXTURE_CUBE_MAP_EXT);
+			}
+			else if (tmu->textureType == TT_2D) {
+				glDisable(GL_TEXTURE_2D);
+			}
 
-		if (opts.textureType == TT_CUBIC) {
-			glEnable(GL_TEXTURE_CUBE_MAP_EXT);
-		}
-		else if (opts.textureType == TT_2D) {
-			glEnable(GL_TEXTURE_2D);
+			if (opts.textureType == TT_CUBIC) {
+				glEnable(GL_TEXTURE_CUBE_MAP_EXT);
+			}
+			else if (opts.textureType == TT_2D) {
+				glEnable(GL_TEXTURE_2D);
+			}
 		}
 		tmu->textureType = opts.textureType;
 	}
@@ -1031,7 +1047,32 @@ void idImage::CopyFramebuffer( int x, int y, int imageWidth, int imageHeight ) {
 
 	const bool readingFromRenderTexture = ( backEnd.renderTexture != NULL ) && ( backEnd.renderTexture->GetNumColorImages() > 0 );
 	const GLenum readAttachment = GL_COLOR_ATTACHMENT0;
-	const bool needsStorageResize = ( opts.width != imageWidth ) || ( opts.height != imageHeight );
+	bool needsStorageResize = ( opts.width != imageWidth ) || ( opts.height != imageHeight );
+
+	// ES 3.0 will not copy the fixed-point default framebuffer into a
+	// floating-point texture. _currentRender is FMT_RGBA16F (Image_intrinsic.cpp),
+	// so on ES the whole non-blit capture path failed silently: glCopyTexImage2D
+	// raised GL_INVALID_OPERATION, the destination kept its 16x16 intrinsic
+	// storage, and because opts.width/height were updated anyway every later
+	// call took the glCopyTexSubImage2D branch and raised GL_INVALID_VALUE for a
+	// region larger than the level. Respecify as RGBA8 instead: the source is an
+	// 8-bit back buffer, so the float storage was buying nothing here. Desktop GL
+	// accepts the mismatched copy and keeps its 16F target.
+	if ( !readingFromRenderTexture && glConfig.backendCaps.profile == RENDERER_CONTEXT_PROFILE_ES ) {
+		const bool destIsFixedPoint =
+			internalFormat == GL_RGBA8 || internalFormat == GL_RGB8
+			|| internalFormat == GL_RGBA || internalFormat == GL_RGB
+			|| internalFormat == GL_SRGB8_ALPHA8 || internalFormat == GL_SRGB8
+			|| internalFormat == GL_RGB565 || internalFormat == GL_RGB5_A1
+			|| internalFormat == GL_RGBA4;
+		if ( !destIsFixedPoint ) {
+			opts.format = FMT_RGBA8;
+			internalFormat = GL_RGBA8;
+			dataFormat = GL_RGBA;
+			dataType = GL_UNSIGNED_BYTE;
+			needsStorageResize = true;
+		}
+	}
 
 	opts.width = imageWidth;
 	opts.height = imageHeight;
@@ -1109,10 +1150,18 @@ void idImage::CopyFramebuffer( int x, int y, int imageWidth, int imageHeight ) {
 			glDisable( GL_SCISSOR_TEST );
 		}
 
-		if ( needsStorageResize ) {
-			glCopyTexImage2D( GL_TEXTURE_2D, 0, internalFormat != 0 ? internalFormat : GL_RGBA8, x, y, imageWidth, imageHeight, 0 );
-		} else {
+		if ( !needsStorageResize ) {
 			glCopyTexSubImage2D( GL_TEXTURE_2D, 0, 0, 0, x, y, imageWidth, imageHeight );
+		} else if ( glConfig.backendCaps.profile == RENDERER_CONTEXT_PROFILE_ES ) {
+			// ES 3.0 constrains glCopyTexImage2D's internalformat more tightly
+			// than desktop does. Allocating the level with glTexImage2D and then
+			// copying into it needs only that the level exist and be
+			// format-compatible with the read buffer, which is always true here.
+			glTexImage2D( GL_TEXTURE_2D, 0, internalFormat != 0 ? internalFormat : GL_RGBA8, imageWidth, imageHeight, 0,
+				dataFormat != 0 ? dataFormat : GL_RGBA, dataType != 0 ? dataType : GL_UNSIGNED_BYTE, NULL );
+			glCopyTexSubImage2D( GL_TEXTURE_2D, 0, 0, 0, x, y, imageWidth, imageHeight );
+		} else {
+			glCopyTexImage2D( GL_TEXTURE_2D, 0, internalFormat != 0 ? internalFormat : GL_RGBA8, x, y, imageWidth, imageHeight, 0 );
 		}
 
 		if ( scissorWasEnabled ) {

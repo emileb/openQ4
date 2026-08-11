@@ -723,6 +723,12 @@ typedef enum {
 	// own simply do not render under this backend -- there is nothing to hand
 	// them back to.
 	BE_MODERN,
+	// Doom 3-shaped GLES 3.0 backend: its own depth / interaction / ambient /
+	// fog passes written directly against ES 3.0, rather than the modern
+	// executor's cluster-forward architecture. Opt-in with `r_renderer glesd3`
+	// on the renderer-gles module only; never selected automatically, so
+	// BE_MODERN remains the default ES path.
+	BE_GLES_D3,
 	BE_BAD
 } backEndName_t;
 
