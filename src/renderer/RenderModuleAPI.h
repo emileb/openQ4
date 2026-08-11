@@ -48,7 +48,9 @@
 //      surface creation (the module never links SDL)
 // Version 7 keeps stale renderer modules from consuming the extended
 // renderEntity_t presentation contract (flat diffuse colour and sweep flags).
-#define RENDER_API_VERSION			7
+// Version 8 adds renderFramebufferDesc_t::glESProfile so a module can request
+// an OpenGL ES context; a stale module would leave that byte uninitialised.
+#define RENDER_API_VERSION			8
 #define RENDER_API_ENTRY_POINT		"GetRenderAPI"
 
 class idSys;
@@ -144,6 +146,8 @@ typedef struct renderFramebufferDesc_s {
 	bool			glDebugContext;
 	// --- version 6 ---
 	int				surfaceKind;		// renderSurfaceKind_t; GL attributes above are ignored for Vulkan
+	// --- version 8 ---
+	bool			glESProfile;		// request an OpenGL ES context; overrides glCoreProfile
 } renderFramebufferDesc_t;
 
 // ABI-neutral mirror of the renderer's glimpParms_t

@@ -716,6 +716,13 @@ const int MAX_GUI_SURFACES	= 1024;		// default size of the drawSurfs list for gu
 
 typedef enum {
 	BE_ARB2,
+	// The programmable path standing on its own, with no ARB2 bridge beneath
+	// it. Selected only on a profile that cannot have ARB2 (desktop core,
+	// OpenGL ES); every compatibility context keeps BE_ARB2 with the modern
+	// executor layered over it as before. Passes the modern executor does not
+	// own simply do not render under this backend -- there is nothing to hand
+	// them back to.
+	BE_MODERN,
 	BE_BAD
 } backEndName_t;
 
@@ -1086,6 +1093,8 @@ extern idCVar r_brightness;				// changes gamma tables
 extern idCVar r_renderer;				// arb, nv10, nv20, r200, gl2, etc
 extern idCVar r_actualRenderer;			// actual active renderer backend after fallback
 extern idCVar r_glTier;					// auto, legacy, gl33, gl41, gl43, gl45, gl46
+extern idCVar r_glesContext;			// request an OpenGL ES 3.0 context (Android GLES backend bring-up)
+extern idCVar r_glCoreProfileFirst;		// try core-profile contexts before the compatibility fallback
 extern idCVar r_glDebugContext;			// request a debug GL context when the platform backend supports it
 extern idCVar r_glDebugOutput;			// report driver debug messages when a debug context is active
 extern idCVar r_glDebugSynchronous;		// synchronously deliver GL debug callbacks for diagnostics

@@ -20,7 +20,7 @@
 // loader-owned cvars: defined here (not in a renderer TU) so they exist in
 // every build shape, including module-only clients that shed the static
 // renderer sources
-static const char *r_renderApiArgs[] = { "best", "gl", "vulkan", "gl-module", NULL };
+static const char *r_renderApiArgs[] = { "best", "gl", "vulkan", "gl-module", "gles", NULL };
 idCVar r_renderApi( "r_renderApi", "gl", CVAR_RENDERER | CVAR_ARCHIVE, "rendering API: best = platform default (currently gl), gl = OpenGL renderer (loaded as the renderer-gl module on module-only builds, statically linked elsewhere), vulkan = native Vulkan renderer module (bring-up; falls back to gl), gl-module = alias that always selects the OpenGL module. Module selections take effect on engine restart.", r_renderApiArgs, idCmdSystem::ArgCompletion_String<r_renderApiArgs> );
 idCVar r_actualRenderApi( "r_actualRenderApi", "UNINITIALIZED", CVAR_RENDERER | CVAR_ROM, "rendering API actually active after request/fallback selection" );
 
@@ -71,8 +71,8 @@ typedef struct rendererModuleState_s {
 static rendererModuleState_t rm_state;
 
 // module binary short tags; indexed by rendererModuleApi_t
-static const char *rm_moduleBinaryTags[ RENDER_MODULE_API_COUNT ] = { "gl", "vk", "gl" };
-static const char *rm_apiNames[ RENDER_MODULE_API_COUNT ] = { "gl", "vulkan", "gl-module" };
+static const char *rm_moduleBinaryTags[ RENDER_MODULE_API_COUNT ] = { "gl", "vk", "gl", "gles" };
+static const char *rm_apiNames[ RENDER_MODULE_API_COUNT ] = { "gl", "vulkan", "gl-module", "gles" };
 
 /*
 ====================
@@ -250,6 +250,10 @@ bool R_RendererModule_ParseApi( const char *value, rendererModuleApi_t &api ) {
 	}
 	if ( idStr::Icmp( value, "gl-module" ) == 0 ) {
 		api = RENDER_MODULE_API_GL_MODULE;
+		return true;
+	}
+	if ( idStr::Icmp( value, "gles" ) == 0 || idStr::Icmp( value, "es" ) == 0 ) {
+		api = RENDER_MODULE_API_GLES;
 		return true;
 	}
 	if ( idStr::Icmp( value, "best" ) == 0 ) {
