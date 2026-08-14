@@ -417,6 +417,78 @@ ID_INLINE idTempArray<T>::~idTempArray() {
 	Mem_Free(buffer);
 }
 
+/*
+================================================
+idTempArray16 is idTempArray with the 16 byte alignment that _alloca16
+guaranteed.
+
+It exists so that a scratch buffer whose size comes from asset data -- a vertex
+count out of a model file, say -- can be moved off the stack without silently
+dropping the alignment the code around it was written against. _alloca16 cannot
+fail: it moves the stack pointer and returns, so a large enough count simply
+walks off the end of the thread's stack and the first write dies on the guard
+page. A model big enough to do that is a normal model on a thread with a small
+stack, which is every thread on Android.
+
+The template parameter MUST BE POD, as with idTempArray.
+================================================
+*/
+template < class T >
+class idTempArray16 {
+public:
+	idTempArray16( unsigned int num ) {
+		this->num = num;
+		buffer = ( T * )Mem_Alloc16( num * sizeof( T ) );
+	}
+	~idTempArray16() {
+		Mem_Free16( buffer );
+	}
+
+	T &			operator []( unsigned int i ) { assert( i < num ); return buffer[i]; }
+	const T &	operator []( unsigned int i ) const { assert( i < num ); return buffer[i]; }
+
+	T *			Ptr() { return buffer; }
+	const T *	Ptr() const { return buffer; }
+
+	size_t		Size() const { return num * sizeof( T ); }
+	unsigned int Num() const { return num; }
+
+	void		Zero() { memset( Ptr(), 0, Size() ); }
+
+private:
+	T *				buffer;
+	unsigned int	num;
+
+	idTempArray16( const idTempArray16 & );
+	idTempArray16 & operator=( const idTempArray16 & );
+};
+
+/*
+================================================
+A 16 byte aligned scratch buffer that stays on the stack while that is cheap and
+moves to the heap once it would not fit.
+
+Some of these sites run per frame, so allocating unconditionally on the heap
+would trade a crash for a malloc in the frame loop; and some are sized from
+asset data, so staying on the stack risks walking off the end of it. The size
+decides. 256KB is 4096 idDrawVerts, comfortably above any normal mesh and well
+below the ~1MB that overflows a thread stack on Android.
+
+Declares 'name' as a 'type *'. As with _alloca16, it is valid to the end of the
+enclosing scope; unlike _alloca16, an oversized count is not fatal.
+================================================
+*/
+#define OPENQ4_STACK_SCRATCH_LIMIT		( 256 * 1024 )
+
+#define OPENQ4_ALLOC16_SCRATCH( type, name, count )										\
+	const unsigned int name##_scratchCount = ( unsigned int )( count );					\
+	idTempArray16< type > name##_scratchHeap(											\
+		( ( size_t )name##_scratchCount * sizeof( type ) >= OPENQ4_STACK_SCRATCH_LIMIT )	\
+			? name##_scratchCount : 0 );												\
+	type *name = ( name##_scratchHeap.Num() > 0 )										\
+		? name##_scratchHeap.Ptr()														\
+		: ( type * )_alloca16( ( size_t )name##_scratchCount * sizeof( type ) )
+
 
 /*
 ===============================================================================
