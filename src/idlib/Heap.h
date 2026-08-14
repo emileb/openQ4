@@ -117,7 +117,10 @@ typedef struct {
 	int		num;
 	int		minSize;
 	int		maxSize;
-	int		totalSize;
+	// A single allocation is bounded by Mem_ValidateAllocSize, but the running
+	// total is not: a loaded Quake 4 map sits within a few hundred megabytes of
+	// INT_MAX, so the accumulator has to be wider than the sizes it sums.
+	int64_t	totalSize;
 } memoryStats_t;
 
 // RAVEN BEGIN
