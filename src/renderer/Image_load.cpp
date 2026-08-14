@@ -1446,6 +1446,17 @@ int idImage::StorageSize() const {
 	}
 	baseSize *= BitsForFormat( opts.format );
 	baseSize /= 8;
+	// A cube map allocates all six faces under one idImage. Counting one face
+	// made listImages report a sixth of what reflection probes and the lightgrid
+	// actually cost, which is the difference between the total agreeing with the
+	// driver's own accounting and being quietly low.
+	if ( opts.textureType == TT_CUBIC ) {
+		baseSize *= 6;
+	}
+	// A multisampled target stores every sample and has no mip chain.
+	if ( opts.numMSAASamples > 1 ) {
+		baseSize *= opts.numMSAASamples;
+	}
 	return baseSize;
 }
 
