@@ -1532,6 +1532,101 @@ void Mem_GetStats( memoryStats_t &stats ) {
 
 /*
 ==================
+openQ4_Mem_GetModuleStats
+
+The cross-binary half of Mem_GetProcessStats. Exported with default visibility
+so it survives the hidden-visibility preset the modules are built with, and
+resolved by name rather than through the versioned module ABI: a renderer or
+game module built before this existed simply fails the lookup and is left out
+of the total, instead of failing to load.
+==================
+*/
+extern "C" MEM_MODULE_STATS_EXPORT void openQ4_Mem_GetModuleStats( memoryStats_t *stats ) {
+	if ( stats == NULL ) {
+		return;
+	}
+	Mem_ReadCounters( mem_total_allocs, *stats );
+}
+
+/*
+================================================
+Registered module providers. Written once per module load, from the loader,
+before anything reads them; a fixed array keeps registration allocation-free,
+which matters because this is reachable from the allocator's own header.
+================================================
+*/
+static const int			MAX_MEM_MODULE_STATS = 8;
+static memModuleStats_t		mem_moduleStats[MAX_MEM_MODULE_STATS];
+static int					mem_numModuleStats = 0;
+
+/*
+==================
+Mem_RegisterModuleStats
+==================
+*/
+void Mem_RegisterModuleStats( memModuleStats_t provider ) {
+	if ( provider == NULL ) {
+		return;
+	}
+	// A vid_restart reloads the renderer module and would otherwise register
+	// the same provider a second time, counting that module twice.
+	for ( int i = 0; i < mem_numModuleStats; i++ ) {
+		if ( mem_moduleStats[i] == provider ) {
+			return;
+		}
+	}
+	if ( mem_numModuleStats >= MAX_MEM_MODULE_STATS ) {
+		return;
+	}
+	mem_moduleStats[mem_numModuleStats++] = provider;
+}
+
+/*
+==================
+Mem_UnregisterModuleStats
+
+Must be called before the module is unloaded: the function pointer dies with it.
+==================
+*/
+void Mem_UnregisterModuleStats( memModuleStats_t provider ) {
+	for ( int i = 0; i < mem_numModuleStats; i++ ) {
+		if ( mem_moduleStats[i] != provider ) {
+			continue;
+		}
+		mem_moduleStats[i] = mem_moduleStats[mem_numModuleStats - 1];
+		mem_moduleStats[--mem_numModuleStats] = NULL;
+		return;
+	}
+}
+
+/*
+==================
+Mem_GetProcessStats
+==================
+*/
+void Mem_GetProcessStats( memoryStats_t &stats ) {
+	Mem_GetStats( stats );
+
+	for ( int i = 0; i < mem_numModuleStats; i++ ) {
+		memoryStats_t moduleStats;
+		memset( &moduleStats, 0, sizeof( moduleStats ) );
+		mem_moduleStats[i]( &moduleStats );
+
+		stats.num += moduleStats.num;
+		stats.totalSize += moduleStats.totalSize;
+		if ( moduleStats.num > 0 ) {
+			if ( moduleStats.minSize < stats.minSize ) {
+				stats.minSize = moduleStats.minSize;
+			}
+			if ( moduleStats.maxSize > stats.maxSize ) {
+				stats.maxSize = moduleStats.maxSize;
+			}
+		}
+	}
+}
+
+/*
+==================
 Mem_UpdateStats
 ==================
 */
@@ -1784,10 +1879,26 @@ where the com_showMemoryUsage overlay cannot.
 ==================
 */
 void Mem_Dump_f( const idCmdArgs &args ) {
-	memoryStats_t stats;
-	Mem_GetStats( stats );
+	memoryStats_t local;
+	Mem_GetStats( local );
 
-	idLib::common->Printf( "%d live allocations, %.1f MB (%lld bytes)\n",
+	// Split the total by binary. Each of the engine, renderer and game links its
+	// own idlib archive, so this says which one is holding the memory -- and on
+	// Android the renderer's line covers the image data, which is usually the
+	// answer being looked for.
+	idLib::common->Printf( "this binary: %d live allocations, %.1f MB\n",
+		local.num, local.totalSize / ( 1024.0 * 1024.0 ) );
+	for ( int i = 0; i < mem_numModuleStats; i++ ) {
+		memoryStats_t moduleStats;
+		memset( &moduleStats, 0, sizeof( moduleStats ) );
+		mem_moduleStats[i]( &moduleStats );
+		idLib::common->Printf( "  module %d: %d live allocations, %.1f MB\n",
+			i, moduleStats.num, moduleStats.totalSize / ( 1024.0 * 1024.0 ) );
+	}
+
+	memoryStats_t stats;
+	Mem_GetProcessStats( stats );
+	idLib::common->Printf( "total: %d live allocations, %.1f MB (%lld bytes)\n",
 		stats.num, stats.totalSize / ( 1024.0 * 1024.0 ), (long long)stats.totalSize );
 	if ( stats.num > 0 ) {
 		idLib::common->Printf( "smallest %d bytes, largest %d bytes, mean %lld bytes\n",

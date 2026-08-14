@@ -6314,6 +6314,11 @@ void idCommonLocal::LoadGameDLL( void ) {
 		return;
 	}
 
+	// the game module links its own idlib archive; fold its allocation
+	// counters into the engine's total. Optional symbol, so a module built
+	// before this existed is simply left out rather than rejected.
+	Mem_RegisterModuleStats( (memModuleStats_t) Sys_DLL_GetProcAddress( gameDLL, MEM_MODULE_STATS_ENTRY_POINT ) );
+
 	game								= gameExport.game;
 	gameEdit							= gameExport.gameEdit;
 	com_activeGameModule.SetString( gameModuleBaseName );
@@ -6342,6 +6347,8 @@ void idCommonLocal::UnloadGameDLL( void ) {
 
 	Com_SetGameModuleLoadPhase( GAME_MODULE_PHASE_BINARY_UNLOAD );
 	if ( gameDLL ) {
+		// drop the counters before the code they live in goes away
+		Mem_UnregisterModuleStats( (memModuleStats_t) Sys_DLL_GetProcAddress( gameDLL, MEM_MODULE_STATS_ENTRY_POINT ) );
 		Sys_DLL_Unload( gameDLL );
 		gameDLL = NULL;
 	}
