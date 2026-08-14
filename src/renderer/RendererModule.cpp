@@ -476,6 +476,8 @@ static void RM_UnloadModule( void ) {
 	rm_state.moduleExportValid = false;
 	memset( &rm_state.moduleExport, 0, sizeof( rm_state.moduleExport ) );
 	if ( rm_state.moduleHandle != 0 ) {
+		// drop the counters before the code they live in goes away
+		Mem_UnregisterModuleStats( ( memModuleStats_t )Sys_DLL_GetProcAddress( rm_state.moduleHandle, MEM_MODULE_STATS_ENTRY_POINT ) );
 		Sys_DLL_Unload( rm_state.moduleHandle );
 		rm_state.moduleHandle = 0;
 	}
@@ -567,6 +569,11 @@ static bool RM_TryLoadModuleApi( rendererModuleApi_t api, rendererModuleStatus_t
 		RM_AppendFallbackReason( status, reason );
 		return false;
 	}
+
+	// The module links its own idlib archive, so its allocations live in a
+	// separate set of counters. Optional symbol, looked up by name: a module
+	// built before this existed just does not contribute to the total.
+	Mem_RegisterModuleStats( ( memModuleStats_t )Sys_DLL_GetProcAddress( handle, MEM_MODULE_STATS_ENTRY_POINT ) );
 
 	rm_state.moduleHandle = handle;
 	rm_state.moduleExport = *moduleExport;
