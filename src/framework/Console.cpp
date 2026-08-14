@@ -1093,10 +1093,11 @@ SCR_DrawMemoryUsage
 float SCR_DrawMemoryUsage( float y ) {
 	memoryStats_t allocs, frees;
 
-	// Mem_GetStats reports what is still held: allocations minus frees. Printed
-	// in MB because a loaded map runs to well over a million kB, which is
-	// unreadable as a single number and used to overflow the 32-bit accumulator.
-	Mem_GetStats( allocs );
+	// Reports what is still held: allocations minus frees, summed over the
+	// engine and every loaded module (each links its own idlib, so each keeps
+	// its own counters). Printed in MB because a loaded map runs to well over a
+	// million kB, unreadable as one number and enough to overflow a 32-bit sum.
+	Mem_GetProcessStats( allocs );
 	SCR_DrawTextRightAlign( y, "live allocations: %d blocks, %.1f MB",
 		allocs.num, allocs.totalSize / ( 1024.0 * 1024.0 ) );
 

@@ -169,12 +169,53 @@ const char *GetMemAllocStats(int tag, int &num, int &size, int &peak);
 #endif
 // RAVEN END
 
+/*
+================================================
+Cross-module allocation totals.
+
+idlib is compiled once per binary: the engine, the renderer module and the game
+module each link their own archive, deliberately, so that the type layouts
+behind __DOOM_DLL__ and GAME_DLL cannot collide. Every copy therefore keeps its
+own allocation counters, and Mem_GetStats can only ever answer for the binary it
+was called from -- which on Android leaves the renderer's image allocations out
+of the engine's total entirely.
+
+Each copy exports MEM_MODULE_STATS_ENTRY_POINT, and whoever loads a module looks
+it up and registers it here. Mem_GetProcessStats then sums the local counters
+with every registered module's. The lookup is by name through the normal dynamic
+symbol path, so a module built before this existed simply does not resolve and
+is skipped rather than breaking the load.
+================================================
+*/
+#define MEM_MODULE_STATS_ENTRY_POINT	"openQ4_Mem_GetModuleStats"
+
+// 'used' is load-bearing, not decoration: nothing inside the binary calls this
+// -- it is only ever reached by name from the loader -- so without it both
+// -dead_strip and --gc-sections drop the symbol and every module silently
+// reports nothing.
+#if defined( _WIN32 )
+	#define MEM_MODULE_STATS_EXPORT		__declspec( dllexport )
+#else
+	#define MEM_MODULE_STATS_EXPORT		__attribute__( ( visibility( "default" ), used ) )
+#endif
+
+typedef void ( *memModuleStats_t )( memoryStats_t *stats );
+
+// Exported from every idlib copy. Reports that binary's counters only.
+extern "C" MEM_MODULE_STATS_EXPORT void openQ4_Mem_GetModuleStats( memoryStats_t *stats );
+
 void		Mem_Init( void );
 void		Mem_Shutdown( void );
 void		Mem_EnableLeakTest( const char *name );
 void		Mem_ClearFrameStats( void );
 void		Mem_GetFrameStats( memoryStats_t &allocs, memoryStats_t &frees );
 void		Mem_GetStats( memoryStats_t &stats );
+// Registers a just-loaded module's exported counters. Ignores NULL and
+// duplicates, so a vid_restart that reloads the same module cannot double-count.
+void		Mem_RegisterModuleStats( memModuleStats_t provider );
+void		Mem_UnregisterModuleStats( memModuleStats_t provider );
+// Local counters plus every registered module's.
+void		Mem_GetProcessStats( memoryStats_t &stats );
 void		Mem_Dump_f( const class idCmdArgs &args );
 void		Mem_DumpCompressed_f( const class idCmdArgs &args );
 void		Mem_AllocDefragBlock( void );
