@@ -4485,8 +4485,16 @@ bool rvRenderModelMD5R::GenerateStaticSurfaces() {
 				continue;
 			}
 
-			idDrawVert *primBatchVerts = (idDrawVert *)_alloca16( tri->numVerts * sizeof( primBatchVerts[ 0 ] ) );
-			glIndex_t *primBatchIndexes = (glIndex_t *)_alloca16( tri->numIndexes * sizeof( primBatchIndexes[ 0 ] ) );
+			// Heap rather than _alloca16, for two reasons. These are sized by the
+			// mesh's vertex and index counts, which is what overflowed the thread
+			// stack in idMD5Mesh::ParseMesh; and this is inside the loop over
+			// every mesh, where alloca never gives the space back until the whole
+			// function returns, so the model's meshes accumulate. Scoping the
+			// buffers to the iteration frees each one as it goes.
+			idTempArray16< idDrawVert > primBatchVertsBuffer( tri->numVerts );
+			idTempArray16< glIndex_t > primBatchIndexesBuffer( tri->numIndexes );
+			idDrawVert *primBatchVerts = primBatchVertsBuffer.Ptr();
+			glIndex_t *primBatchIndexes = primBatchIndexesBuffer.Ptr();
 			if ( !CopyPrimBatchTriangles( mesh, primBatchVerts, primBatchIndexes, NULL ) ) {
 				continue;
 			}
