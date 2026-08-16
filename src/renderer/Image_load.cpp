@@ -181,8 +181,18 @@ change in the interaction shaders. Until that exists they stay uncompressed
 rather than quietly looking wrong.
 ========================
 */
-static ID_INLINE textureFormat_t R_ETC2FormatForUsage( textureUsage_t usage ) {
+static ID_INLINE textureFormat_t R_ETC2FormatForUsage( textureUsage_t usage, bool isCubeMap ) {
 	if ( !glConfig.etc2TextureCompressionAvailable || glConfig.textureCompressionAvailable ) {
+		return FMT_RGBA8;
+	}
+
+	// Cube maps are built by idBinaryImage::LoadCubeFromMemory, which has no
+	// ETC2 branch: the format would fall through to its uncompressed default and
+	// be stored as RGBA8. That is worse than merely not compressing, because
+	// DeriveOpts would ask for ETC2 again on the next load, mismatch the RGBA8
+	// header, and re-derive and rewrite the image on every single load forever.
+	// Measured as 12 such images looping on game/airdefense1 before this check.
+	if ( isCubeMap ) {
 		return FMT_RGBA8;
 	}
 
@@ -286,7 +296,7 @@ ID_INLINE void idImage::DeriveOpts() {
 				// no S3TC and image_useETC2 opts this usage in, so gammaMips and
 				// colorFormat stay exactly as they were.
 				opts.gammaMips = false;
-				opts.format = R_ETC2FormatForUsage( usage );
+				opts.format = R_ETC2FormatForUsage( usage, cubeFiles != CF_2D );
 				opts.colorFormat = CFM_DEFAULT;
 				break;
 		}
@@ -721,6 +731,13 @@ void idImage::ActuallyLoadImage( bool fromBackEnd ) {
 		if ( candidateFileTime == FILE_NOT_FOUND_TIMESTAMP ) {
 			return false;
 		}
+		// A rejection here throws the cache entry away and re-derives the image
+		// from source, which on a device with no DDS fast path means decoding
+		// and recompressing it -- the single most expensive thing a map load
+		// does. Each gate reports both sides, because a systematically wrong
+		// timestamp or a stale opts field makes the cache silently useless
+		// while still looking populated on disk.
+		const bool reportGeneratedCache = cvarSystem->GetCVarBool( "image_showGeneratedImageWrites" );
 		if ( !productionMode ) {
 			if ( !sourceFileTimeKnown ) {
 				if ( cubeFiles != CF_2D ) {
@@ -733,17 +750,41 @@ void idImage::ActuallyLoadImage( bool fromBackEnd ) {
 				sourceFileTimeKnown = true;
 			}
 			if ( im.GetFileHeader().sourceFileTime != sourceFileTime ) {
+				if ( reportGeneratedCache ) {
+					common->Printf( "generated cache MISS %s: header=%lld computed=%lld (source '%s'%s)\n",
+						generatedName.c_str(),
+						( long long )im.GetFileHeader().sourceFileTime,
+						( long long )sourceFileTime,
+						selectedSourceName.c_str(),
+						preferredDDSImage ? ", dds replacement" : "" );
+				}
 				im.Clear();
 				return false;
 			}
 		}
 		if ( !R_BinaryImageHeaderSupportedByRenderer( im.GetFileHeader() ) ) {
+			if ( reportGeneratedCache ) {
+				common->Printf( "generated cache UNSUPPORTED %s: format=%d\n",
+					generatedName.c_str(), im.GetFileHeader().format );
+			}
 			im.Clear();
 			return false;
 		}
 		if ( !productionMode && !R_GeneratedImageHeaderMatchesDerivedOpts( im.GetFileHeader(), opts, usage ) ) {
+			if ( reportGeneratedCache ) {
+				const bimageFile_t &h = im.GetFileHeader();
+				common->Printf( "generated cache OPTSMISS %s: fmt hdr=%d drv=%d, color hdr=%d drv=%d, type hdr=%d drv=%d, usage=%d\n",
+					generatedName.c_str(),
+					h.format, opts.format,
+					h.colorFormat, opts.colorFormat,
+					h.textureType, opts.textureType,
+					(int)usage );
+			}
 			im.Clear();
 			return false;
+		}
+		if ( reportGeneratedCache ) {
+			common->Printf( "generated cache hit %s\n", generatedName.c_str() );
 		}
 		return true;
 	};

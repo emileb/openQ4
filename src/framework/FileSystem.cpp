@@ -4964,17 +4964,25 @@ idFileSystemLocal::SetupGameDirectories
 ================
 */
 void idFileSystemLocal::SetupGameDirectories( const char *gameName ) {
-	// Cache first, so it ends up with the *lowest* search priority: entries are
-	// prepended, so whatever is added last wins. Nothing in the cache should
-	// ever shadow real game data -- it only holds generated/, which no pk4
-	// provides -- and this way a stale cache cannot mask a content update.
-	if ( fs_cachepath.GetString()[0] ) {
-		AddGameDirectory( fs_cachepath.GetString(), gameName );
-	}
-
 	// setup savepath
 	if ( fs_savepath.GetString()[0] ) {
 		AddGameDirectory( fs_savepath.GetString(), gameName );
+	}
+
+	// Cache after savepath, which gives it the higher search priority of the
+	// two: entries are prepended, so whatever is added last is found first.
+	//
+	// It must outrank savepath specifically because the cache is the only thing
+	// that writes the generated/ tree. Ordering it below savepath means a
+	// generated file left there by an older build is found first, fails the
+	// derived-opts check against what the current build wants, and is re-derived
+	// and rewritten into the cache on every single load -- where it is never
+	// read, because the stale copy keeps winning. Measured on the Note 20 that
+	// was 1249 of 1944 images re-encoded every load against a 1.1 GB stale tree.
+	//
+	// It stays below basepath and cdpath, so real game content still wins.
+	if ( fs_cachepath.GetString()[0] ) {
+		AddGameDirectory( fs_cachepath.GetString(), gameName );
 	}
 
 	// setup basepath
