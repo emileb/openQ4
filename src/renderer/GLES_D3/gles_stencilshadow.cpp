@@ -107,12 +107,9 @@ static void RB_GLESD3_T_Shadow( const drawSurf_t *surf ) {
 	myGlMultMatrix( surf->space->modelViewMatrix, backEnd.viewDef->projectionMatrix, mvp );
 	glUniformMatrix4fv( gles_shadowProgram->uMVP, 1, GL_FALSE, mvp );
 
-	if ( r_useScissor.GetBool() && !backEnd.currentScissor.Equals( surf->scissorRect ) ) {
-		backEnd.currentScissor = surf->scissorRect;
-		glScissor( backEnd.viewDef->viewport.x1 + backEnd.currentScissor.x1,
-			backEnd.viewDef->viewport.y1 + backEnd.currentScissor.y1,
-			backEnd.currentScissor.x2 + 1 - backEnd.currentScissor.x1,
-			backEnd.currentScissor.y2 + 1 - backEnd.currentScissor.y1 );
+	// an empty rect covers no pixels: skip rather than issue a rejected call
+	if ( !RB_GLESD3_SetScissor( surf->scissorRect ) ) {
+		return;
 	}
 
 	if ( !GLESD3_BindShadowVertexes( tri ) ) {

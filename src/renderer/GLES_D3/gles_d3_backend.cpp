@@ -89,6 +89,64 @@ and should go to 0.
 static idCVar r_glesD3PresentSceneTarget( "r_glesD3PresentSceneTarget", "1", CVAR_RENDERER | CVAR_BOOL,
 		"gles_d3: blit the scene render target to the back buffer at the end of a 3D view (bring-up scaffolding; the resolve material replaces it)" );
 
+/*
+====================
+RB_GLESD3_SetScissor
+====================
+*/
+bool RB_GLESD3_SetScissor( const idScreenRect &rect ) {
+	if ( rect.IsEmpty() ) {
+		// An empty rect covers no pixels. Issuing it means glScissor with a
+		// negative width, which GL rejects and ignores -- leaving the previous
+		// box live while the tracker moves on. Skip the draw instead.
+		return false;
+	}
+
+	if ( !r_useScissor.GetBool() || backEnd.currentScissor.Equals( rect ) ) {
+		return true;
+	}
+
+	backEnd.currentScissor = rect;
+
+	const GLint x = backEnd.viewDef->viewport.x1 + rect.x1;
+	const GLint y = backEnd.viewDef->viewport.y1 + rect.y1;
+	const GLsizei w = rect.x2 + 1 - rect.x1;
+	const GLsizei h = rect.y2 + 1 - rect.y1;
+	glScissor( x, y, w, h );
+
+	return true;
+}
+
+/*
+====================
+RB_GLESD3_SamplePixels
+
+Five points, not one.
+
+Every readback in this backend sampled vidWidth/2, vidHeight/2 -- and on
+game/airdefense1 the artifact's live box is the door frame's scissor rect,
+718,285..1245,868, which CONTAINS that point. So every measurement taken while
+chasing the frozen frame was taken from the one region still working, and all
+of them came back healthy.
+
+A centre sample cannot distinguish "the frame rendered" from "a box in the
+middle of the frame rendered". The corners can.
+====================
+*/
+static void RB_GLESD3_SamplePixels( idStr &out ) {
+	const int w = glConfig.vidWidth;
+	const int h = glConfig.vidHeight;
+	const int px[ 5 ] = { w / 10, w / 2, w * 9 / 10, w / 10, w * 9 / 10 };
+	const int py[ 5 ] = { h / 10, h / 2, h / 2,      h * 9 / 10, h * 9 / 10 };
+
+	out = "";
+	for ( int i = 0; i < 5; i++ ) {
+		GLubyte c[ 4 ] = { 0, 0, 0, 0 };
+		glReadPixels( px[i], py[i], 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, c );
+		out += va( "(%i,%i)=%i,%i,%i ", px[i], py[i], c[0], c[1], c[2] );
+	}
+}
+
 static int rb_glesD3Reported3DViews = 0;
 static int rb_glesD3Reported2DViews = 0;
 static GLenum rb_glesD3EntryError = 0;
@@ -354,6 +412,18 @@ void RB_GLESD3_DrawView( void ) {
 	// dozens of 2D loading-screen views; reporting both would push the first
 	// scene view out of any sane cap.
 	const bool is3D = backEnd.viewDef->viewEntitys != NULL;
+
+	// Re-arm whenever the cvar is touched. The cap keeps a run from flooding,
+	// but the view worth seeing is usually minutes in -- setting r_glesD3Report
+	// again from the console resets the counters so the NEXT frame reports.
+	// Without this the reporting is only ever armed during startup, which is
+	// exactly when nothing interesting is on screen.
+	if ( r_glesD3Report.IsModified() ) {
+		r_glesD3Report.ClearModified();
+		rb_glesD3Reported3DViews = 0;
+		rb_glesD3Reported2DViews = 0;
+	}
+
 	const bool reportThisView = r_glesD3Report.GetInteger() > 0
 			&& ( is3D ? rb_glesD3Reported3DViews : rb_glesD3Reported2DViews ) < 4;
 	if ( reportThisView ) {
@@ -363,20 +433,27 @@ void RB_GLESD3_DrawView( void ) {
 			rb_glesD3Reported2DViews++;
 		}
 		const GLenum entryErr = rb_glesD3EntryError;
-		GLubyte px[ 4 ] = { 0, 0, 0, 0 };
-		glReadPixels( glConfig.vidWidth / 2, glConfig.vidHeight / 2, 1, 1,
-				GL_RGBA, GL_UNSIGNED_BYTE, px );
-		common->Printf( "glesd3 %s view %i: viewport=%i,%i %ix%i target=%i "
-				"surfs=%i lights=%s afterClear=%i,%i,%i,%i entryErr=0x%04x err=0x%04x\n",
+		idStr samples;
+		RB_GLESD3_SamplePixels( samples );
+		// The scissor is what separates a subview from the main view: a mirror,
+		// remote camera or GUI surface renders with viewDef->scissor set to
+		// that surface's screen rect, while the main view gets the whole
+		// viewport. A box anchored to world geometry is that rect.
+		common->Printf( "glesd3 %s view %i: viewport=%i,%i %ix%i scissor=%i,%i..%i,%i "
+				"isSubview=%i target=%i surfs=%i lights=%s "
+				"afterClear[ %s] entryErr=0x%04x err=0x%04x\n",
 				is3D ? "3d" : "2d",
 				is3D ? rb_glesD3Reported3DViews : rb_glesD3Reported2DViews,
 				backEnd.viewDef->viewport.x1, backEnd.viewDef->viewport.y1,
 				backEnd.viewDef->viewport.x2 + 1 - backEnd.viewDef->viewport.x1,
 				backEnd.viewDef->viewport.y2 + 1 - backEnd.viewDef->viewport.y1,
+				backEnd.viewDef->scissor.x1, backEnd.viewDef->scissor.y1,
+				backEnd.viewDef->scissor.x2, backEnd.viewDef->scissor.y2,
+				backEnd.viewDef->isSubview ? 1 : 0,
 				backEnd.renderTexture != NULL ? (int)backEnd.renderTexture->GetDeviceHandle() : 0,
 				backEnd.viewDef->numDrawSurfs,
 				backEnd.viewDef->viewLights ? "yes" : "no",
-				px[0], px[1], px[2], px[3], entryErr, glGetError() );
+				samples.c_str(), entryErr, glGetError() );
 		R_GLESD3_ResetSkipCounts();
 	}
 
@@ -432,15 +509,14 @@ void RB_GLESD3_DrawView( void ) {
 	// which is how seven wrongly-drawn heatHaze stages on game/airdefense1
 	// stayed invisible to the counters that exist to catch exactly that.
 	if ( r_glesD3Report.GetInteger() > 0 && reportThisView && is3D ) {
-		GLubyte px[ 4 ] = { 0, 0, 0, 0 };
-		glReadPixels( glConfig.vidWidth / 2, glConfig.vidHeight / 2, 1, 1,
-				GL_RGBA, GL_UNSIGNED_BYTE, px );
+		idStr samples;
+		RB_GLESD3_SamplePixels( samples );
 		int fogLights = 0, blendLights = 0, fogDraws = 0, fogSkips = 0;
 		RB_GLESD3_FogBlendCounts( fogLights, blendLights, fogDraws, fogSkips );
-		common->Printf( "glesd3 afterMaterial(view %i): drawElements=%i mid=%i,%i,%i,%i "
+		common->Printf( "glesd3 afterMaterial(view %i): drawElements=%i px[ %s] "
 				"fog=%i/%i draws=%i skipped=%i err=0x%04x\n",
 				rb_glesD3Reported3DViews, backEnd.pc.c_drawElements,
-				px[0], px[1], px[2], px[3],
+				samples.c_str(),
 				fogLights, blendLights, fogDraws, fogSkips, glGetError() );
 		R_GLESD3_ReportSkipCounts();
 	}

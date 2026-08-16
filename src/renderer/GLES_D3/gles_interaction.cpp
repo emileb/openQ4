@@ -319,12 +319,9 @@ static void GLESD3_CreateSingleDrawInteractions( const drawSurf_t *surf ) {
 		backEnd.currentSpace = surf->space;
 	}
 
-	if ( r_useScissor.GetBool() && !backEnd.currentScissor.Equals( surf->scissorRect ) ) {
-		backEnd.currentScissor = surf->scissorRect;
-		glScissor( backEnd.viewDef->viewport.x1 + backEnd.currentScissor.x1,
-			backEnd.viewDef->viewport.y1 + backEnd.currentScissor.y1,
-			backEnd.currentScissor.x2 + 1 - backEnd.currentScissor.x1,
-			backEnd.currentScissor.y2 + 1 - backEnd.currentScissor.y1 );
+	// an empty rect covers no pixels: skip rather than issue a rejected call
+	if ( !RB_GLESD3_SetScissor( surf->scissorRect ) ) {
+		return;
 	}
 
 	memset( &inter, 0, sizeof( inter ) );
@@ -564,14 +561,15 @@ void RB_GLESD3_DrawInteractions( void ) {
 			// black -- measured: the whole right-hand side of hangar1 lost its
 			// lighting. Scoped to the light's scissor so the clear costs only
 			// the pixels the light can reach.
-			backEnd.currentScissor = vLight->scissorRect;
-			if ( r_useScissor.GetBool() ) {
-				glScissor( viewDef->viewport.x1 + backEnd.currentScissor.x1,
-					viewDef->viewport.y1 + backEnd.currentScissor.y1,
-					backEnd.currentScissor.x2 + 1 - backEnd.currentScissor.x1,
-					backEnd.currentScissor.y2 + 1 - backEnd.currentScissor.y1 );
+			// The worst of the empty-rect cases: a rejected glScissor here left
+			// the PREVIOUS box live and then scoped this clear to it, so the
+			// stencil outside that box kept the last light's volume counts and
+			// every later interaction there was stencil-rejected. An empty
+			// light rect means the light reaches no pixels, so there is nothing
+			// to clear either.
+			if ( RB_GLESD3_SetScissor( vLight->scissorRect ) ) {
+				glClear( GL_STENCIL_BUFFER_BIT );
 			}
-			glClear( GL_STENCIL_BUFFER_BIT );
 		} else {
 			// no shadows for this light: nothing to read or write, and the
 			// GEQUAL test left by a previous light must not carry over
