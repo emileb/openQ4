@@ -99,9 +99,9 @@ idCVar image_useETC2(
 	"image_useETC2",
 	"0",
 	CVAR_RENDERER | CVAR_ARCHIVE | CVAR_INTEGER,
-	"compress textures to ETC2 when the driver exposes no S3TC:\n 0: off, keep uncompressed RGBA8\n 1: specular only\n 2: specular and diffuse",
+	"compress textures to ETC2 when the driver exposes no S3TC:\n 0: off, keep uncompressed RGBA8\n 1: specular only\n 2: specular and diffuse\n 3: specular, diffuse and bump (bump as EAC_RG11)",
 	0,
-	2 );
+	3 );
 idCVar image_picmip(
 	"image_picmip",
 	"0",

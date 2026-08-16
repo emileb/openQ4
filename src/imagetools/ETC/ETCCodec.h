@@ -39,6 +39,8 @@ public:
 	// 8 bpp. EAC alpha block followed by the ETC2 colour block, which is the
 	// order the format defines. Writes ( width / 4 ) * ( height / 4 ) * 16 bytes.
 	void	CompressImageETC2_RGBA8( const byte *inBuf, byte *outBuf, int width, int height ) const;
+	// normal maps: X from red, Y from green, Z rebuilt in the shader
+	void	CompressImageEAC_RG11( const byte *inBuf, byte *outBuf, int width, int height ) const;
 };
 
 #endif /* !__ETCCODEC_H__ */

@@ -178,7 +178,8 @@ void idBinaryImage::Load2DFromMemory( int width, int height, const byte * pic_co
 		int	dxtWidth = 0;
 		int	dxtHeight = 0;
 		if ( textureFormat == FMT_DXT5 || textureFormat == FMT_DXT1 ||
-			 textureFormat == FMT_ETC2_RGB8 || textureFormat == FMT_ETC2_RGBA8 ) {
+			 textureFormat == FMT_ETC2_RGB8 || textureFormat == FMT_ETC2_RGBA8 ||
+			 textureFormat == FMT_EAC_RG11 ) {
 			if ( ( scaledWidth & 3 ) || ( scaledHeight & 3 ) ) {
 				dxtWidth = ( scaledWidth + 3 ) & ~3;
 				dxtHeight = ( scaledHeight + 3 ) & ~3;
@@ -238,6 +239,16 @@ void idBinaryImage::Load2DFromMemory( int width, int height, const byte * pic_co
 			idEtcEncoder etc;
 			img.Alloc( dxtWidth * dxtHeight );
 			etc.CompressImageETC2_RGBA8( dxtPic, img.data, dxtWidth, dxtHeight );
+		} else if ( textureFormat == FMT_EAC_RG11 ) {
+			// Normal maps only, and they reach here with X already in red and Y
+			// in green: idDxtDecoder::DecompressNormalMapDXT5 writes the decoded
+			// RXGB that way, and R_HeightmapToNormalMap builds it that way. The
+			// CFM_NORMAL_DXT5 pre-swizzle above would move X into alpha, but
+			// DeriveOpts only ever pairs this format with CFM_DEFAULT, so it
+			// does not run.
+			idEtcEncoder etc;
+			img.Alloc( dxtWidth * dxtHeight );
+			etc.CompressImageEAC_RG11( dxtPic, img.data, dxtWidth, dxtHeight );
 		} else if ( textureFormat == FMT_LUM8 || textureFormat == FMT_INT8 ) {
 			// LUM8 and INT8 just read the red channel
 			img.Alloc( scaledWidth * scaledHeight );

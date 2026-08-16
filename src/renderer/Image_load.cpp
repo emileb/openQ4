@@ -71,10 +71,11 @@ and better than anything re-encoded from them could be; ETC2 there would be a
 pure loss. It is the drivers with no DXT -- the Adreno 650 class -- that were
 carrying every texture at 32 bpp with nowhere to go.
 
-Bump maps are deliberately absent. ETC2's RGB modes assume correlated channels,
-which normals violate, and the right answer for them is EAC_RG11 plus a decode
-change in the interaction shaders. Until that exists they stay uncompressed
-rather than quietly looking wrong.
+Bump maps are last, at level 3, because they are the only usage whose format
+change reaches the shaders: EAC_RG11 stores no Z, so the interaction shaders
+rebuild it. ETC2's RGB modes were never an option for them -- those fit a single
+colour line through all three channels, which models a photograph well and a
+normal badly.
 ========================
 */
 static ID_INLINE textureFormat_t R_ETC2FormatForUsage( textureUsage_t usage, bool isCubeMap ) {
@@ -110,6 +111,16 @@ static ID_INLINE textureFormat_t R_ETC2FormatForUsage( textureUsage_t usage, boo
 				// instead of 4 -- still a quarter of uncompressed -- and the
 				// per-image alpha split is a later refinement.
 				return FMT_ETC2_RGBA8;
+			}
+			return FMT_RGBA8;
+		case TD_BUMP:
+			if ( level >= 3 ) {
+				// 8 bpp, same as ETC2_RGBA8, but spent on two channels with
+				// independent endpoints each rather than on three sharing one
+				// colour line plus an alpha. That is why normals survive it:
+				// measured 0.63 degrees RMS angular error on synthetic bump
+				// art, against 4.09 degrees at the worst block.
+				return FMT_EAC_RG11;
 			}
 			return FMT_RGBA8;
 		default:

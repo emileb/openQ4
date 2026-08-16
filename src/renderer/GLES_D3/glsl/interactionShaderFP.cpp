@@ -6,7 +6,7 @@
 // Quake 4 specific comes across unchanged; listed here so a later divergence
 // shows up as a diff rather than as a defect:
 //
-//   - DXT5/RXGB bump decode: alpha=x, green=y, blue=z, no renormalization
+//   - bump decode: alpha=x, green=y, z rebuilt, no renormalization
 //   - specular through the REAL _specularTable ramp, x2 because the CPU-side
 //     ARB2 path doubles the specular env constant
 //   - projected light falloff and light projection sampled with textureProj
@@ -62,8 +62,17 @@ vec3 SafeNormalize(vec3 value) {
 void main() {
     vec4 bumpSample = texture(uBumpMap, vBumpTexCoord);
 
-    // RXGB / DXT5nm: x in alpha, y in green, z in blue, no renormalization
-    vec3 localNormal = vec3(bumpSample.a, bumpSample.g, bumpSample.b) * 2.0 - 1.0;
+    // X from alpha, Y from green. RXGB/DXT5nm puts X in alpha natively, and
+    // gl_Image.cpp swizzles alpha <- red for every other bump format, so this
+    // one pair of reads covers all of them.
+    //
+    // Z is rebuilt rather than sampled: EAC_RG11 stores only two channels.
+    // Tangent-space normals are unit length with Z > 0, so this returns what
+    // blue carried -- the DXT5 normal decoder derives that channel the same
+    // way. Still no renormalization; the result is unit by construction.
+    vec2 localNormalXY = vec2(bumpSample.a, bumpSample.g) * 2.0 - 1.0;
+    vec3 localNormal = vec3(localNormalXY,
+        sqrt(max(1.0 - dot(localNormalXY, localNormalXY), 0.0)));
 
     // an ambient light lights from a constant direction instead of from the
     // light origin, which is what keeps unlit corners off pure black
