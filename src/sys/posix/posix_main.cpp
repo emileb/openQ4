@@ -346,7 +346,11 @@ bool Sys_GetSecureRandomBytes( void *buffer, int bytes ) {
 Sys_Mkdir
 ================
 */
+// defined in FileSystem.cpp -- a new directory can invalidate cached lookups
+void FS_InvalidateOSDirectoryCache( void );
+
 void Sys_Mkdir( const char *path ) {
+	FS_InvalidateOSDirectoryCache();
 	if ( path == NULL || path[0] == '\0' ) {
 		return;
 	}

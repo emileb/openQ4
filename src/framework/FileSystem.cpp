@@ -1546,6 +1546,7 @@ private:
 	static idCVar			fs_basepath;
 	static idCVar			fs_homepath;
 	static idCVar			fs_savepath;
+	static idCVar			fs_cachepath;
 	static idCVar			fs_cdpath;
 	static idCVar			fs_game;
 	static idCVar			fs_game_base;
@@ -1642,6 +1643,13 @@ idCVar	idFileSystemLocal::fs_copyfiles( "fs_copyfiles", "0", CVAR_SYSTEM | CVAR_
 idCVar	idFileSystemLocal::fs_basepath( "fs_basepath", "", CVAR_SYSTEM | CVAR_INIT, "" );
 idCVar	idFileSystemLocal::fs_homepath( "fs_homepath", "", CVAR_SYSTEM | CVAR_INIT, "" );
 idCVar	idFileSystemLocal::fs_savepath( "fs_savepath", "", CVAR_SYSTEM | CVAR_INIT, "" );
+// Regenerable data only: the generated/ tree (binary image and sound caches).
+// Empty means "write it to fs_savepath", which is where it went before this
+// existed, so leaving it unset changes nothing. Hosts that have a directory the
+// OS may reclaim -- Android's getCacheDir(), XDG_CACHE_HOME -- should point this
+// there, because a purged cache costs a slow reload and nothing else, while a
+// purged savepath costs the player their config and saves.
+idCVar	idFileSystemLocal::fs_cachepath( "fs_cachepath", "", CVAR_SYSTEM | CVAR_INIT, "regenerable cache directory for the generated/ tree; empty uses fs_savepath" );
 idCVar	idFileSystemLocal::fs_cdpath( "fs_cdpath", "", CVAR_SYSTEM | CVAR_INIT, "" );
 idCVar	idFileSystemLocal::fs_game( "fs_game", OPENQ4_GAMEDIR, CVAR_SYSTEM | CVAR_INIT | CVAR_SERVERINFO, "mod path" );
 idCVar  idFileSystemLocal::fs_game_base( "fs_game_base", "", CVAR_SYSTEM | CVAR_INIT | CVAR_SERVERINFO, "alternate mod path, searched after the main fs_game path, before the basedir" );
@@ -1938,6 +1946,109 @@ bool idFileSystemLocal::FilenameCompare( const char *s1, const char *s2 ) const 
 
 /*
 ================
+OS directory existence cache
+
+Case recovery below is only reachable when fopen() has already failed, and by
+far the most common reason for that is an asset that lives in a pk4 rather than
+loose on disk. Every search path is tried for every such file, so the engine
+asks "does <searchpath>/<gamedir>/models/... exist" thousands of times a load
+and gets the same answer every time -- after enumerating a directory to find it.
+
+Caching the answer per directory turns the second and subsequent asks into a
+hash lookup. Ancestors count too: once a directory is known to be absent,
+nothing beneath it can exist, so a whole subtree costs one stat.
+
+This only ever suppresses work that could not have succeeded. Where a directory
+does exist the recovery runs exactly as before, so mods with mismatched
+filename case keep working.
+================
+*/
+static const int MAX_CACHED_OS_DIRECTORIES = 4096;
+
+class idOSDirectoryCache {
+public:
+					idOSDirectoryCache() { hash.Clear( 1024, 1024 ); }
+
+	bool			Exists( const char *directory );
+	void			Invalidate() { hash.Clear( 1024, 1024 ); paths.Clear(); present.Clear(); }
+
+private:
+	int				Find( const char *directory ) const;
+	static bool		StatDirectory( const char *directory );
+
+	idHashIndex		hash;
+	idStrList		paths;
+	idList<bool>	present;
+};
+
+int idOSDirectoryCache::Find( const char *directory ) const {
+	const int key = hash.GenerateKey( directory, false );
+	for ( int i = hash.First( key ); i != -1; i = hash.Next( i ) ) {
+		if ( paths[i].Icmp( directory ) == 0 ) {
+			return i;
+		}
+	}
+	return -1;
+}
+
+bool idOSDirectoryCache::StatDirectory( const char *directory ) {
+#ifdef WIN32
+	struct _stat st;
+	if ( _stat( directory, &st ) != 0 ) {
+		return false;
+	}
+	return ( st.st_mode & _S_IFDIR ) != 0;
+#else
+	struct stat st;
+	if ( stat( directory, &st ) != 0 ) {
+		return false;
+	}
+	return S_ISDIR( st.st_mode );
+#endif
+}
+
+bool idOSDirectoryCache::Exists( const char *directory ) {
+	if ( directory == NULL || directory[0] == '\0' ) {
+		return false;
+	}
+
+	int index = Find( directory );
+	if ( index != -1 ) {
+		return present[index];
+	}
+
+	// Walk up before touching the disk: a cached "missing" ancestor settles
+	// this without a syscall, which is what makes a deep asset tree cheap.
+	idStr parent = directory;
+	parent.StripFilename();
+	bool exists;
+	if ( parent.Length() > 1 && parent.Icmp( directory ) != 0 && !Exists( parent.c_str() ) ) {
+		exists = false;
+	} else {
+		exists = StatDirectory( directory );
+	}
+
+	// A load touches a bounded set of directories, but a long session browsing
+	// many maps should not grow this without limit.
+	if ( paths.Num() >= MAX_CACHED_OS_DIRECTORIES ) {
+		Invalidate();
+	}
+
+	index = paths.Append( idStr( directory ) );
+	present.Append( exists );
+	hash.Add( hash.GenerateKey( directory, false ), index );
+
+	return exists;
+}
+
+static idOSDirectoryCache osDirectoryCache;
+
+void FS_InvalidateOSDirectoryCache( void ) {
+	osDirectoryCache.Invalidate();
+}
+
+/*
+================
 idFileSystemLocal::OpenOSFile
 optional caseSensitiveName is set to case sensitive file name as found on disc (fs_caseSensitiveOS only)
 ================
@@ -1959,6 +2070,15 @@ FILE *idFileSystemLocal::OpenOSFile( const char *fileName, const char *mode, idS
 #endif
 	fp = fopen( fileName, mode );
 	if ( !fp && fs_caseSensitiveOS.GetBool() ) {
+		// Nothing can be recovered out of a directory that is not there, and
+		// probes for pk4-resident assets name directories that do not exist on
+		// disk at all. Answering those from the cache skips the enumeration.
+		idStr parentDirectory = fileName;
+		parentDirectory.StripFilename();
+		if ( parentDirectory.Length() > 1 && !osDirectoryCache.Exists( parentDirectory.c_str() ) ) {
+			return NULL;
+		}
+
 		idStr resolvedFileName;
 		if ( ResolveCaseInsensitiveOSPath( fileName, resolvedFileName, true ) ) {
 			fp = fopen( resolvedFileName, mode );
@@ -2072,6 +2192,9 @@ void idFileSystemLocal::CreateOSPath( const char *OSPath ) {
 			*ofs = PATHSEPERATOR_CHAR;
 		}
 	}
+
+	// directories just appeared where the cache may have recorded none
+	FS_InvalidateOSDirectoryCache();
 }
 
 /*
@@ -4964,6 +5087,14 @@ idFileSystemLocal::SetupGameDirectories
 ================
 */
 void idFileSystemLocal::SetupGameDirectories( const char *gameName ) {
+	// Cache first, so it ends up with the *lowest* search priority: entries are
+	// prepended, so whatever is added last wins. Nothing in the cache should
+	// ever shadow real game data -- it only holds generated/, which no pk4
+	// provides -- and this way a stale cache cannot mask a content update.
+	if ( fs_cachepath.GetString()[0] ) {
+		AddGameDirectory( fs_cachepath.GetString(), gameName );
+	}
+
 	// setup savepath
 	if ( fs_savepath.GetString()[0] ) {
 		AddGameDirectory( fs_savepath.GetString(), gameName );
@@ -6179,14 +6310,23 @@ void idFileSystemLocal::Init( void ) {
 	if ( fs_savepath.GetString()[0] == '\0' ) {
 		fs_savepath.SetString( fs_homepath.GetString() );
 	}
+	// Resolving this to fs_savepath rather than leaving it empty keeps the log
+	// honest about where the generated/ tree actually lands. It also costs
+	// nothing when the two are equal: SetupGameDirectories adds the cache first
+	// and AddGameDirectory ignores a duplicate path, so the search order comes
+	// out exactly as it did before.
+	if ( fs_cachepath.GetString()[0] == '\0' ) {
+		fs_cachepath.SetString( fs_savepath.GetString() );
+	}
 	// fs_cdpath is locked to the platform content root (the app's Resources
 	// directory on macOS, otherwise the process current directory).
 	fs_cdpath.SetString( Sys_DefaultCDPath() );
 	common->Printf(
-		"Filesystem paths: fs_basepath='%s' fs_homepath='%s' fs_savepath='%s' fs_cdpath='%s' fs_game='%s' fs_game_base='%s'\n",
+		"Filesystem paths: fs_basepath='%s' fs_homepath='%s' fs_savepath='%s' fs_cachepath='%s' fs_cdpath='%s' fs_game='%s' fs_game_base='%s'\n",
 		fs_basepath.GetString(),
 		fs_homepath.GetString(),
 		fs_savepath.GetString(),
+		fs_cachepath.GetString(),
 		fs_cdpath.GetString(),
 		fs_game.GetString(),
 		fs_game_base.GetString() );
