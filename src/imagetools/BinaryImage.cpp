@@ -532,13 +532,16 @@ ID_TIME_T idBinaryImage::WriteGeneratedFile( ID_TIME_T sourceFileTime ) {
 
 	idStr binaryFileName;
 	MakeGeneratedFileName( binaryFileName );
-	// Write generated cache data to savepath so long image-program names stay under
-	// Windows path limits even when fs_basepath points at "Program Files".
+	// fs_cachepath, not fs_savepath: this tree is entirely regenerable and is by
+	// far the largest thing the engine writes -- hundreds of MB per map when no
+	// DDS fast path is available. It still keeps long image-program names off
+	// fs_basepath, which can sit under a Windows path limit in "Program Files".
+	// fs_cachepath resolves to fs_savepath unless the host pointed it somewhere.
 	idStr writeFileName = binaryFileName;
-	idFile *outputFile = fileSystem->OpenFileWrite( writeFileName, "fs_savepath" );
+	idFile *outputFile = fileSystem->OpenFileWrite( writeFileName, "fs_cachepath" );
 	if ( outputFile == NULL ) {
 		R_MakeCompactBinaryImageFileName( writeFileName, GetName() );
-		outputFile = fileSystem->OpenFileWrite( writeFileName, "fs_savepath" );
+		outputFile = fileSystem->OpenFileWrite( writeFileName, "fs_cachepath" );
 	}
 	idFileLocal file( outputFile );
 	if ( file == NULL ) {
