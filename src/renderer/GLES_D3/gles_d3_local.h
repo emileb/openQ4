@@ -109,6 +109,29 @@ int		RB_GLESD3_DrawShaderPasses( drawSurf_t **drawSurfs, int numDrawSurfs,
 // cannot double-copy. _currentDepth is not captured -- see gles_shaderpasses.cpp.
 void	R_GLESD3_CaptureCurrentRender( void );
 
+/*
+====================
+RB_GLESD3_SetScissor
+
+The one place this backend changes the scissor. Every pass used to carry its
+own copy of the same delta-code, and each copy repeated the same two defects:
+
+  - An EMPTY rect (idScreenRect::Clear() leaves 32000,32000..-32000,-32000, and
+    R_AddModelSurfaces really does produce them -- measured on airdefense1,
+    five of nineteen view entities in one frame) computes a width of
+    x2 + 1 - x1 = -63999. glScissor raises GL_INVALID_VALUE and DOES NOTHING,
+    so GL silently keeps the previous box while backEnd.currentScissor records
+    the new one. Every later surface that matches the tracked rect then skips
+    the re-issue and draws through whatever box happened to be left.
+  - backEnd.currentScissor was assigned before the r_useScissor check in one
+    caller and after it in the others.
+
+Returns false when the rect is empty, meaning "this surface can cover no
+pixels" -- the caller skips the draw rather than issuing a rejected call.
+====================
+*/
+bool	RB_GLESD3_SetScissor( const idScreenRect &rect );
+
 // The depth prepass. Not optional before the material pass: idMaterial gives
 // every opaque and perforated stage GLS_DEPTHFUNC_EQUAL, so an unfilled depth
 // buffer rejects the entire opaque world.

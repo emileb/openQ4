@@ -132,15 +132,9 @@ RB_RenderDrawSurfChainWithFunction sets the scissor per surface before calling
 the tri function; both chain walks here go through this.
 ====================
 */
-static void GLESD3_FogBlendSurfaceScissor( const drawSurf_t *surf ) {
-	if ( !r_useScissor.GetBool() || backEnd.currentScissor.Equals( surf->scissorRect ) ) {
-		return;
-	}
-	backEnd.currentScissor = surf->scissorRect;
-	glScissor( backEnd.viewDef->viewport.x1 + backEnd.currentScissor.x1,
-		backEnd.viewDef->viewport.y1 + backEnd.currentScissor.y1,
-		backEnd.currentScissor.x2 + 1 - backEnd.currentScissor.x1,
-		backEnd.currentScissor.y2 + 1 - backEnd.currentScissor.y1 );
+static bool GLESD3_FogBlendSurfaceScissor( const drawSurf_t *surf ) {
+	// false means the rect is empty and the surface can cover no pixels
+	return RB_GLESD3_SetScissor( surf->scissorRect );
 }
 
 /*
@@ -292,12 +286,16 @@ static void GLESD3_FogPass( const drawSurf_t *drawSurfs, const drawSurf_t *drawS
 	// RB_RenderDrawSurfChainWithFunction
 	gles_fogSpace = NULL;
 	for ( const drawSurf_t *surf = drawSurfs; surf != NULL; surf = surf->nextOnLight ) {
-		GLESD3_FogBlendSurfaceScissor( surf );
+		if ( !GLESD3_FogBlendSurfaceScissor( surf ) ) {
+			continue;
+		}
 		GLESD3_T_BasicFog( surf );
 	}
 	gles_fogSpace = NULL;
 	for ( const drawSurf_t *surf = drawSurfs2; surf != NULL; surf = surf->nextOnLight ) {
-		GLESD3_FogBlendSurfaceScissor( surf );
+		if ( !GLESD3_FogBlendSurfaceScissor( surf ) ) {
+			continue;
+		}
 		GLESD3_T_BasicFog( surf );
 	}
 
@@ -307,7 +305,9 @@ static void GLESD3_FogPass( const drawSurf_t *drawSurfs, const drawSurf_t *drawS
 			| GLS_DEPTHFUNC_LESS );
 	GL_Cull( CT_BACK_SIDED );
 	gles_fogSpace = NULL;
-	GLESD3_FogBlendSurfaceScissor( &ds );
+	if ( !GLESD3_FogBlendSurfaceScissor( &ds ) ) {
+		return;
+	}
 	GLESD3_T_BasicFog( &ds );
 	GL_Cull( CT_FRONT_SIDED );
 }
@@ -445,12 +445,16 @@ static void GLESD3_BlendLight( const drawSurf_t *drawSurfs, const drawSurf_t *dr
 
 		gles_fogSpace = NULL;
 		for ( const drawSurf_t *surf = drawSurfs; surf != NULL; surf = surf->nextOnLight ) {
-			GLESD3_FogBlendSurfaceScissor( surf );
+			if ( !GLESD3_FogBlendSurfaceScissor( surf ) ) {
+			continue;
+		}
 			GLESD3_T_BlendLight( surf );
 		}
 		gles_fogSpace = NULL;
 		for ( const drawSurf_t *surf = drawSurfs2; surf != NULL; surf = surf->nextOnLight ) {
-			GLESD3_FogBlendSurfaceScissor( surf );
+			if ( !GLESD3_FogBlendSurfaceScissor( surf ) ) {
+			continue;
+		}
 			GLESD3_T_BlendLight( surf );
 		}
 	}
