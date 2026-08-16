@@ -125,7 +125,16 @@ idImage::DeriveOpts
 ID_INLINE void idImage::DeriveOpts() {
 
 	if ( usage == TD_FONT ) {
-		opts.format = FMT_DXT1;
+		// Unguarded, this asked for DXT1 on renderers with no S3TC, which
+		// R_BinaryImageHeaderSupportedByRenderer then rejected -- so the font
+		// was re-derived and rewritten on every single map load and its cache
+		// entry could never be used. TD_LIGHTGRID below has always guarded the
+		// same way; this is only catching up with it.
+		//
+		// CFM_GREEN_ALPHA survives the change: Load2DFromMemory applies that
+		// swizzle before it looks at the format, so the font shader still finds
+		// the coverage value in green either way.
+		opts.format = glConfig.textureCompressionAvailable ? FMT_DXT1 : FMT_RGBA8;
 		opts.colorFormat = CFM_GREEN_ALPHA;
 		opts.numLevels = 4; // Retail Quake 4's generated font-atlas path keeps four mip levels.
 		opts.gammaMips = true;
