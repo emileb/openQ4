@@ -524,6 +524,29 @@ void RB_GLESD3_DrawView( void ) {
 	if ( is3D ) {
 		RB_GLESD3_PresentSceneTarget();
 	}
+
+	// Hand the context back with a full scissor. The engine runs
+	// scissor-sensitive commands BETWEEN views with no scissor handling of
+	// their own -- RB_ResolveMSAA blits the scene into
+	// _forwardRenderResolvedAlbedo and RB_ClearRenderTarget clears the
+	// postprocess target, and both inherit whatever box the last drawn surface
+	// left.
+	//
+	// Measured on Android (game/airdefense1, storm active): the 3D view ended
+	// with the door-frame surface's box 819,334 534x570, the resolve and the
+	// postprocess clear were clipped to it, and the presented frame was last
+	// frame's resolve everywhere outside that box -- a frozen screen with one
+	// live square. Which surface draws last depends on the scene; the
+	// lightning flicker and the door state change it, which is why the
+	// artifact tracked the storm.
+	//
+	// ARB2 does this same restore at the end of its present
+	// (draw_arb2.cpp:10831); this backend dropped it.
+	glScissor( 0, 0, glConfig.vidWidth, glConfig.vidHeight );
+	backEnd.currentScissor.x1 = 0;
+	backEnd.currentScissor.y1 = 0;
+	backEnd.currentScissor.x2 = glConfig.vidWidth - 1;
+	backEnd.currentScissor.y2 = glConfig.vidHeight - 1;
 }
 
 #endif /* OPENQ4_RENDERER_GLES_MODULE */

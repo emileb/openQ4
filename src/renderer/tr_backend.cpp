@@ -755,6 +755,15 @@ static void RB_ResolveMSAA(const void* data) {
 	glBindFramebuffer(GL_READ_FRAMEBUFFER, sourceHandle);
 	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, destinationHandle);
 
+	// A resolve is a whole-target operation, and glBlitFramebuffer is clipped
+	// by the scissor; it must not depend on whatever box the previous view
+	// left. Measured on Android: a leaked per-surface box clipped this blit to
+	// one door frame and froze everything outside it.
+	const GLboolean resolveScissorWasEnabled = glIsEnabled( GL_SCISSOR_TEST );
+	if ( resolveScissorWasEnabled ) {
+		glDisable( GL_SCISSOR_TEST );
+	}
+
 	// Resolve all of the render targets.
 	const int colorImageCount = cmd->msaaRenderTexture->GetNumColorImages();
 	for (int i = 0; i < colorImageCount; i++)
@@ -778,6 +787,10 @@ static void RB_ResolveMSAA(const void* data) {
 	glReadBuffer(GL_COLOR_ATTACHMENT0);
 	glDrawBuffer(GL_COLOR_ATTACHMENT0);
 
+	if ( resolveScissorWasEnabled ) {
+		glEnable( GL_SCISSOR_TEST );
+	}
+
 	// restore the tracked render target so backEnd.renderTexture stays in
 	// sync with the bound framebuffer
 	RB_RestoreTrackedRenderTexture();
@@ -792,6 +805,15 @@ static void RB_ClearRenderTarget(const void* data) {
 	const renderClearBufferCommand_t* cmd;
 
 	cmd = (renderClearBufferCommand_t*)data;
+
+	// this command means "clear the whole target": it must not be clipped by
+	// whatever scissor box the previous view left (same hazard as the alpha
+	// clear at the top of this file, and measured on Android clipping the
+	// postprocess target's clear to one surface's box)
+	const GLboolean clearScissorWasEnabled = glIsEnabled( GL_SCISSOR_TEST );
+	if ( clearScissorWasEnabled ) {
+		glDisable( GL_SCISSOR_TEST );
+	}
 
 	if ( cmd->clearColor ) {
 		glColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE );
@@ -815,6 +837,11 @@ static void RB_ClearRenderTarget(const void* data) {
 	}
 
 	glClearDepth(1.0f);
+
+	if ( clearScissorWasEnabled ) {
+		glEnable( GL_SCISSOR_TEST );
+	}
+
 	GL_ClearStateDelta();
 
 }
