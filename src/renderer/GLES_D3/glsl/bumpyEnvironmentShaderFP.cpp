@@ -39,9 +39,11 @@ vec3 SafeNormalize(vec3 value) {
 void main() {
     vec4 bumpSample = texture(uTexture1, vNormalTexCoord);
 
-    // Quake 4's RXGB/DXT5 normal compression stores X in ALPHA, with Y and Z
-    // in green and blue -- the same decode the interaction shader uses.
-    vec3 localNormal = vec3(bumpSample.a, bumpSample.g, bumpSample.b) * 2.0 - 1.0;
+    // X in alpha, Y in green, Z rebuilt because EAC_RG11 does not store it --
+    // the same decode the interaction shader uses.
+    vec2 localNormalXY = vec2(bumpSample.a, bumpSample.g) * 2.0 - 1.0;
+    vec3 localNormal = vec3(localNormalXY,
+        sqrt(max(1.0 - dot(localNormalXY, localNormalXY), 0.0)));
     localNormal = SafeNormalize(localNormal);
 
     vec3 globalNormal =

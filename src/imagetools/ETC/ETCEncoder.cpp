@@ -47,6 +47,17 @@ An EAC block is also 64 bits:
 
 decoded = clamp( base + eacModifierTable[table][index] * multiplier )
 
+That is the 8-bit decode, used for the alpha half of ETC2_RGBA8. EAC_RG11 packs
+two of the same 64-bit blocks per 4x4 -- R then G -- but decodes them to 11 bits:
+
+	decoded11 = clamp( ( base + eacModifierTable[table][index] * multiplier ) * 8 + 4, 0, 2047 )
+
+which is the 8-bit result rescaled: v/255 versus ( v * 8 + 4 )/2047, equal to
+within half a step of 1/2047. So the same integer search in 8-bit space produces
+the right bits for both, and EtcCompressEacBlock serves both formats. The only
+asymmetry is the +4 rounding bias, which costs a normal component at most
+0.002 -- far below the quantisation the block indices impose anyway.
+
 ================================================================================================
 */
 
@@ -383,19 +394,23 @@ static void EtcCompressColorBlock( const etcBlock_t &block, byte *outBuf ) {
 
 /*
 ========================
-EtcCompressAlphaBlock
+EtcCompressEacBlock
 
-EAC, single channel. Searches every table, and for each one only the multipliers
-that could plausibly span the block's alpha range, which keeps this far cheaper
-than the full 16 x 15 x 256 space without measurably costing quality on the
-mostly flat alpha Quake 4's art carries.
+EAC, one channel of the block into one 64-bit unit. Searches every table, and
+for each one only the multipliers that could plausibly span the block's range,
+which keeps this far cheaper than the full 16 x 15 x 256 space without
+measurably costing quality on the mostly flat alpha Quake 4's art carries.
+
+channel selects the source: 3 for the alpha half of ETC2_RGBA8, 0 and 1 for the
+X and Y halves of EAC_RG11. See the format note at the top for why one 8-bit
+search covers the 11-bit decode as well.
 ========================
 */
-static void EtcCompressAlphaBlock( const etcBlock_t &block, byte *outBuf ) {
+static void EtcCompressEacBlock( const etcBlock_t &block, int channel, byte *outBuf ) {
 	int alphaMin = 255;
 	int alphaMax = 0;
 	for ( int i = 0; i < 16; i++ ) {
-		const int a = block.color[i][3];
+		const int a = block.color[i][ channel ];
 		alphaMin = Min( alphaMin, a );
 		alphaMax = Max( alphaMax, a );
 	}
@@ -435,7 +450,7 @@ static void EtcCompressAlphaBlock( const etcBlock_t &block, byte *outBuf ) {
 				int indices[16];
 				int error = 0;
 				for ( int i = 0; i < 16; i++ ) {
-					const int a = block.color[i][3];
+					const int a = block.color[i][ channel ];
 					int pixelBest = ETC_ERROR_SENTINEL;
 					int pixelIndex = 0;
 					for ( int index = 0; index < 8; index++ ) {
@@ -517,8 +532,38 @@ void idEtcEncoder::CompressImageETC2_RGBA8( const byte *inBuf, byte *outBuf, int
 			etcBlock_t block;
 			EtcGatherBlock( inBuf, width, x, y, block );
 			// alpha first, then colour: the order the format defines
-			EtcCompressAlphaBlock( block, outBuf );
+			EtcCompressEacBlock( block, 3, outBuf );
 			EtcCompressColorBlock( block, outBuf + 8 );
+			outBuf += 16;
+		}
+	}
+}
+
+/*
+========================
+idEtcEncoder::CompressImageEAC_RG11
+
+Two-channel normal maps. The caller has already put the normal's X in red and
+Y in green -- both the DXT5/RXGB decoder and the heightmap image programs emit
+that layout -- and the interaction shaders rebuild Z as sqrt( 1 - x^2 - y^2 ),
+so the third component is never stored.
+
+Giving X and Y a private channel each is the whole point of the format: ETC2's
+RGB modes fit one colour line through all three channels at once, which is a
+good model for a photograph and a bad one for a normal, where X and Y are
+independent by construction.
+========================
+*/
+void idEtcEncoder::CompressImageEAC_RG11( const byte *inBuf, byte *outBuf, int width, int height ) const {
+	assert( ( width & 3 ) == 0 && ( height & 3 ) == 0 );
+
+	for ( int y = 0; y < height; y += 4 ) {
+		for ( int x = 0; x < width; x += 4 ) {
+			etcBlock_t block;
+			EtcGatherBlock( inBuf, width, x, y, block );
+			// R then G, the order GL_COMPRESSED_RG11_EAC defines
+			EtcCompressEacBlock( block, 0, outBuf );
+			EtcCompressEacBlock( block, 1, outBuf + 8 );
 			outBuf += 16;
 		}
 	}
