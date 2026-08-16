@@ -39,11 +39,14 @@ vec3 SafeNormalize(vec3 value) {
 void main() {
     vec4 bumpSample = texture(uTexture1, vNormalTexCoord);
 
-    // X in alpha, Y in green, Z rebuilt because EAC_RG11 does not store it --
-    // the same decode the interaction shader uses.
+    // X in alpha, Y in green, and Z from blue unless the format has no blue --
+    // EAC_RG11 decodes it to -1.0, which no real normal reaches. The same
+    // decode the interaction shader uses; see there for why it is a test on
+    // the value rather than a shader permutation.
     vec2 localNormalXY = vec2(bumpSample.a, bumpSample.g) * 2.0 - 1.0;
-    vec3 localNormal = vec3(localNormalXY,
-        sqrt(max(1.0 - dot(localNormalXY, localNormalXY), 0.0)));
+    float storedZ = bumpSample.b * 2.0 - 1.0;
+    float rebuiltZ = sqrt(max(1.0 - dot(localNormalXY, localNormalXY), 0.0));
+    vec3 localNormal = vec3(localNormalXY, storedZ < 0.0 ? rebuiltZ : storedZ);
     localNormal = SafeNormalize(localNormal);
 
     vec3 globalNormal =
