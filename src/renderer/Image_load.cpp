@@ -77,8 +77,18 @@ change in the interaction shaders. Until that exists they stay uncompressed
 rather than quietly looking wrong.
 ========================
 */
-static ID_INLINE textureFormat_t R_ETC2FormatForUsage( textureUsage_t usage ) {
+static ID_INLINE textureFormat_t R_ETC2FormatForUsage( textureUsage_t usage, bool isCubeMap ) {
 	if ( !glConfig.etc2TextureCompressionAvailable || glConfig.textureCompressionAvailable ) {
+		return FMT_RGBA8;
+	}
+
+	// Cube maps are built by idBinaryImage::LoadCubeFromMemory, which has no
+	// ETC2 branch: the format would fall through to its uncompressed default and
+	// be stored as RGBA8. That is worse than merely not compressing, because
+	// DeriveOpts would ask for ETC2 again on the next load, mismatch the RGBA8
+	// header, and re-derive and rewrite the image on every single load forever.
+	// Measured as 12 such images looping on game/airdefense1 before this check.
+	if ( isCubeMap ) {
 		return FMT_RGBA8;
 	}
 
@@ -172,7 +182,7 @@ ID_INLINE void idImage::DeriveOpts() {
 				// no S3TC and image_useETC2 opts this usage in, so gammaMips and
 				// colorFormat stay exactly as they were.
 				opts.gammaMips = false;
-				opts.format = R_ETC2FormatForUsage( usage );
+				opts.format = R_ETC2FormatForUsage( usage, cubeFiles != CF_2D );
 				opts.colorFormat = CFM_DEFAULT;
 				break;
 		}
@@ -603,12 +613,47 @@ void idImage::ActuallyLoadImage( bool fromBackEnd ) {
 			sourceFileTimeKnown = true;
 		}
 		if ( im.GetFileHeader().sourceFileTime != sourceFileTime ) {
+			// A mismatch here throws the cache entry away and re-derives the
+			// image from source, which on a device with no DDS fast path means
+			// decoding and recompressing it -- the single most expensive thing
+			// a map load does. Report both sides, because a systematically
+			// wrong timestamp on either one makes the cache silently useless
+			// while still looking populated on disk.
+			if ( cvarSystem->GetCVarBool( "image_showGeneratedImageWrites" ) ) {
+				common->Printf( "generated cache MISS %s: header=%lld computed=%lld (source '%s'%s)\n",
+					generatedName.c_str(),
+					( long long )im.GetFileHeader().sourceFileTime,
+					( long long )sourceFileTime,
+					selectedSourceName.c_str(),
+					preferredDDSImage ? ", dds replacement" : "" );
+			}
 			im.Clear();
 			binaryFileTime = FILE_NOT_FOUND_TIMESTAMP;
 		}
 	}
 
 	const bool binaryImageAvailable = binaryFileTime != FILE_NOT_FOUND_TIMESTAMP && R_BinaryImageHeaderSupportedByRenderer( im.GetFileHeader() );
+	// The timestamp check above is only the first of three gates. A cache entry
+	// whose stored opts disagree with what DeriveOpts just computed is thrown
+	// away too, and that failure is invisible from outside: the file is on disk,
+	// it is current, and it still gets re-derived and rewritten on every load.
+	if ( cvarSystem->GetCVarBool( "image_showGeneratedImageWrites" ) ) {
+		const bimageFile_t &h = im.GetFileHeader();
+		if ( binaryFileTime == FILE_NOT_FOUND_TIMESTAMP ) {
+			// already reported by the timestamp branch, or no file at all
+		} else if ( !R_BinaryImageHeaderSupportedByRenderer( h ) ) {
+			common->Printf( "generated cache UNSUPPORTED %s: format=%d\n", generatedName.c_str(), h.format );
+		} else if ( !R_GeneratedImageHeaderMatchesDerivedOpts( h, opts, usage ) ) {
+			common->Printf( "generated cache OPTSMISS %s: fmt hdr=%d drv=%d, color hdr=%d drv=%d, type hdr=%d drv=%d, usage=%d\n",
+				generatedName.c_str(),
+				h.format, opts.format,
+				h.colorFormat, opts.colorFormat,
+				h.textureType, opts.textureType,
+				(int)usage );
+		} else {
+			common->Printf( "generated cache hit %s\n", generatedName.c_str() );
+		}
+	}
 	if ( ( fileSystem->InProductionMode() && binaryImageAvailable ) || ( binaryImageAvailable
 		&& R_GeneratedImageHeaderMatchesDerivedOpts( im.GetFileHeader(), opts, usage )
 		) ) {
