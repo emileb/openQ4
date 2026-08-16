@@ -5523,6 +5523,7 @@ void idCommonLocal::InitRenderSystem( void ) {
 		imageToolsCompressionCaps_t compressionCaps;
 		compressionCaps.textureCompressionAvailable = rendererConfig.textureCompressionAvailable;
 		compressionCaps.bptcTextureCompressionAvailable = rendererConfig.bptcTextureCompressionAvailable;
+		compressionCaps.etc2TextureCompressionAvailable = rendererConfig.etc2TextureCompressionAvailable;
 		ImageTools_SetCompressionCaps( compressionCaps );
 	}
 

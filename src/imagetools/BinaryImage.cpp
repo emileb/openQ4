@@ -39,6 +39,7 @@ If you have questions concerning this license or the applicable additional terms
 #include "../renderer/Image.h"
 #include "../idlib/CryptoHash.h"
 #include "DXT/DXTCodec.h"
+#include "ETC/ETCCodec.h"
 #include "Color/ColorSpace.h"
 
 idCVar image_highQualityCompression( "image_highQualityCompression", "0", CVAR_BOOL, "Use high quality (slow) compression" );
@@ -104,7 +105,7 @@ static void R_MakeCompactBinaryImageFileName( idStr &compactFileName, const char
 }
 
 static bool R_BinaryImageFormatIsBlockCompressed( textureFormat_t format ) {
-	return format == FMT_DXT1 || format == FMT_DXT5 || format == FMT_BC7;
+	return BytesPerBlockForFormat( format ) > 0;
 }
 
 static int R_BinaryImageMinimumDataSize( textureFormat_t format, int width, int height ) {
@@ -121,7 +122,7 @@ static int R_BinaryImageMinimumDataSize( textureFormat_t format, int width, int 
 	if ( R_BinaryImageFormatIsBlockCompressed( format ) ) {
 		const int64 blocksWide = Max( (int64)1, ( (int64)width + 3 ) >> 2 );
 		const int64 blocksHigh = Max( (int64)1, ( (int64)height + 3 ) >> 2 );
-		const int64 bytesPerBlock = ( format == FMT_DXT1 ) ? 8 : 16;
+		const int64 bytesPerBlock = BytesPerBlockForFormat( format );
 		dataSize = blocksWide * blocksHigh * bytesPerBlock;
 	} else {
 		dataSize = ( (int64)width * height * bitsForFormat + 7 ) / 8;
@@ -212,12 +213,14 @@ void idBinaryImage::Load2DFromMemory( int width, int height, const byte * pic_co
 			uploadPic = filtered;
 		}
 
-		// Images that are going to be DXT compressed and aren't multiples of 4 need to be 
-		// padded out before compressing.
-		const byte * dxtPic = uploadPic;
+		// Images that are going to be block compressed and aren't multiples of 4
+		// need to be padded out before compressing. ETC2 and EAC use the same
+		// 4x4 blocks as DXT, so they take the same padding.
+		byte * dxtPic = uploadPic;
 		int	dxtWidth = 0;
 		int	dxtHeight = 0;
-		if ( textureFormat == FMT_DXT5 || textureFormat == FMT_DXT1 ) {
+		if ( textureFormat == FMT_DXT5 || textureFormat == FMT_DXT1 ||
+			 textureFormat == FMT_ETC2_RGB8 || textureFormat == FMT_ETC2_RGBA8 ) {
 			if ( ( scaledWidth & 3 ) || ( scaledHeight & 3 ) ) {
 				dxtWidth = ( scaledWidth + 3 ) & ~3;
 				dxtHeight = ( scaledHeight + 3 ) & ~3;
@@ -270,6 +273,14 @@ void idBinaryImage::Load2DFromMemory( int width, int height, const byte * pic_co
 					dxt.CompressImageDXT5Fast( dxtPic, img.data, dxtWidth, dxtHeight );
 				}
 			}
+		} else if ( textureFormat == FMT_ETC2_RGB8 ) {
+			idEtcEncoder etc;
+			img.Alloc( dxtWidth * dxtHeight / 2 );
+			etc.CompressImageETC2_RGB8( dxtPic, img.data, dxtWidth, dxtHeight );
+		} else if ( textureFormat == FMT_ETC2_RGBA8 ) {
+			idEtcEncoder etc;
+			img.Alloc( dxtWidth * dxtHeight );
+			etc.CompressImageETC2_RGBA8( dxtPic, img.data, dxtWidth, dxtHeight );
 		} else if ( textureFormat == FMT_LUM8 || textureFormat == FMT_INT8 ) {
 			// LUM8 and INT8 just read the red channel
 			img.Alloc( scaledWidth * scaledHeight );
@@ -687,7 +698,7 @@ bool idBinaryImage::LoadFromGeneratedFile( idFile * bFile, ID_TIME_T sourceFileT
 		Clear();
 		return false;
 	}
-	if ( fileData.format <= FMT_NONE || fileData.format > FMT_BC7 || BitsForFormat( (textureFormat_t)fileData.format ) <= 0 ) {
+	if ( fileData.format <= FMT_NONE || fileData.format > FMT_MAX_VALID || BitsForFormat( (textureFormat_t)fileData.format ) <= 0 ) {
 		Clear();
 		return false;
 	}
