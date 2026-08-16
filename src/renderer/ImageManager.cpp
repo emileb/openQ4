@@ -86,6 +86,22 @@ idCVar image_ignoreHighQuality(
 	"0",
 	CVAR_RENDERER | CVAR_ARCHIVE | CVAR_BOOL,
 	"ignore material highquality / uncompressed image usage hints" );
+// Only does anything where the renderer reports no S3TC, which in practice
+// means an OpenGL ES driver that never exposed it -- everywhere else the DXT
+// data Quake 4 ships is already being uploaded as-is and is both smaller and
+// better than anything re-encoded from it would be.
+//
+// Rising by usage rather than all at once because each step has a different
+// risk: specular is the least visually sensitive, diffuse needs the alpha split
+// decided against real materials, and bump wants EAC_RG11 plus a shader change
+// that does not exist yet.
+idCVar image_useETC2(
+	"image_useETC2",
+	"0",
+	CVAR_RENDERER | CVAR_ARCHIVE | CVAR_INTEGER,
+	"compress textures to ETC2 when the driver exposes no S3TC:\n 0: off, keep uncompressed RGBA8\n 1: specular only\n 2: specular and diffuse",
+	0,
+	2 );
 idCVar image_picmip(
 	"image_picmip",
 	"0",

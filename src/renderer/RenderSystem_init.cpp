@@ -991,6 +991,7 @@ void R_PublishCompressionCapsToImageTools( void ) {
 	imageToolsCompressionCaps_t compressionCaps;
 	compressionCaps.textureCompressionAvailable = glConfig.textureCompressionAvailable;
 	compressionCaps.bptcTextureCompressionAvailable = glConfig.bptcTextureCompressionAvailable;
+	compressionCaps.etc2TextureCompressionAvailable = glConfig.etc2TextureCompressionAvailable;
 	ImageTools_SetCompressionCaps( compressionCaps );
 }
 
@@ -1137,6 +1138,26 @@ static void R_CheckPortableExtensions( void ) {
 	glConfig.bptcTextureCompressionAvailable =
 		textureCompressionAvailable &&
 		bptcTextureCompressionAdvertised;
+
+	// ETC2 and EAC are core in OpenGL ES 3.0 -- no extension string to check,
+	// and every device that can run this renderer has them. That is the whole
+	// point: on the Adreno 650 class, which advertises no S3TC at all, this is
+	// the only compressed format the driver will take, and without it every
+	// texture lands at FMT_RGBA8.
+	//
+	// Deliberately NOT enabled for desktop GL. Core since 4.3 there too, but
+	// desktop drivers commonly satisfy that by decompressing to RGBA in the
+	// driver, which is slower than uncompressed and no smaller. Desktop has
+	// S3TC and does not need this path.
+	glConfig.etc2TextureCompressionAvailable =
+		( glConfig.backendCaps.profile == RENDERER_CONTEXT_PROFILE_ES ) &&
+		glConfig.glVersion >= 3.0f &&
+		textureCompressionEntryPointsAvailable;
+	if ( glConfig.etc2TextureCompressionAvailable ) {
+		common->Printf( "...using ETC2/EAC texture compression (core in ES 3.0)\n" );
+	} else {
+		common->Printf( "X..ETC2/EAC texture compression not used on this context\n" );
+	}
 
 	// push the compression capabilities into the shared imagetools library,
 	// which gates precompressed-DDS selection without reading renderer globals

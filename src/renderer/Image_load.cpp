@@ -60,6 +60,55 @@ static void R_DownsizeLoadedCubeImageData( const char *name, textureUsage_t usag
 
 /*
 ========================
+R_ETC2FormatForUsage
+
+The uncompressed default, unless this renderer has no S3TC at all and
+image_useETC2 has opted this usage in.
+
+The S3TC condition is the whole point of the gate. Where DXT is available the
+engine uploads Quake 4's shipped DXT blocks untouched, which is both smaller
+and better than anything re-encoded from them could be; ETC2 there would be a
+pure loss. It is the drivers with no DXT -- the Adreno 650 class -- that were
+carrying every texture at 32 bpp with nowhere to go.
+
+Bump maps are deliberately absent. ETC2's RGB modes assume correlated channels,
+which normals violate, and the right answer for them is EAC_RG11 plus a decode
+change in the interaction shaders. Until that exists they stay uncompressed
+rather than quietly looking wrong.
+========================
+*/
+static ID_INLINE textureFormat_t R_ETC2FormatForUsage( textureUsage_t usage ) {
+	if ( !glConfig.etc2TextureCompressionAvailable || glConfig.textureCompressionAvailable ) {
+		return FMT_RGBA8;
+	}
+
+	const int level = image_useETC2.GetInteger();
+	if ( level <= 0 ) {
+		return FMT_RGBA8;
+	}
+
+	switch ( usage ) {
+		case TD_SPECULAR:
+			// Greyscale-ish and low frequency: the least that block artefacts
+			// can cost, which is why this is the first usage switched over.
+			return FMT_ETC2_RGB8;
+		case TD_DIFFUSE:
+		case TD_DEFAULT:
+			if ( level >= 2 ) {
+				// RGBA8 rather than RGB8 because a diffuse map may carry alpha
+				// and nothing here knows yet whether this one does. Costs 8 bpp
+				// instead of 4 -- still a quarter of uncompressed -- and the
+				// per-image alpha split is a later refinement.
+				return FMT_ETC2_RGBA8;
+			}
+			return FMT_RGBA8;
+		default:
+			return FMT_RGBA8;
+	}
+}
+
+/*
+========================
 idImage::DeriveOpts
 ========================
 */
@@ -118,12 +167,16 @@ ID_INLINE void idImage::DeriveOpts() {
 			opts.format = FMT_RGBA8;
 			break;
 		default:
+				// TD_SPECULAR, TD_BUMP, TD_DIFFUSE and TD_DEFAULT all land here.
+				// R_ETC2FormatForUsage returns FMT_RGBA8 unless the renderer has
+				// no S3TC and image_useETC2 opts this usage in, so gammaMips and
+				// colorFormat stay exactly as they were.
 				opts.gammaMips = false;
-				opts.format = FMT_RGBA8;
+				opts.format = R_ETC2FormatForUsage( usage );
 				opts.colorFormat = CFM_DEFAULT;
 				break;
 		}
-		
+
 /*
 		switch ( usage ) {
 			case TD_COVERAGE:
@@ -224,6 +277,10 @@ static ID_INLINE bool R_BinaryImageHeaderSupportedByRenderer( const bimageFile_t
 		return false;
 	}
 	if ( format == FMT_BC7 && !glConfig.bptcTextureCompressionAvailable ) {
+		return false;
+	}
+	if ( ( format == FMT_ETC2_RGB8 || format == FMT_ETC2_RGBA8 || format == FMT_EAC_RG11 ) &&
+			!glConfig.etc2TextureCompressionAvailable ) {
 		return false;
 	}
 	return true;
@@ -1499,6 +1556,9 @@ void idImage::Print() const {
 		NAME_FORMAT( DXT1 );
 		NAME_FORMAT( DXT5 );
 		NAME_FORMAT( BC7 );
+		NAME_FORMAT( ETC2_RGB8 );
+		NAME_FORMAT( ETC2_RGBA8 );
+		NAME_FORMAT( EAC_RG11 );
 		NAME_FORMAT( DEPTH );
 		NAME_FORMAT( X16 );
 		NAME_FORMAT( Y16_X16 );

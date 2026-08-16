@@ -64,22 +64,28 @@ GLES module through the same branches rather than duplicating them.
 #define GL_COMPRESSED_RGBA_BPTC_UNORM 0x8E8C
 #endif
 
+// core in ES 3.0 and in desktop GL 4.3, but the desktop GL headers this file
+// sees are older than either
+#ifndef GL_COMPRESSED_RGB8_ETC2
+#define GL_COMPRESSED_RGB8_ETC2 0x9274
+#endif
+#ifndef GL_COMPRESSED_RGBA8_ETC2_EAC
+#define GL_COMPRESSED_RGBA8_ETC2_EAC 0x9278
+#endif
+#ifndef GL_COMPRESSED_RG11_EAC
+#define GL_COMPRESSED_RG11_EAC 0x9272
+#endif
+
 static int R_CompressedTextureSizeInBytes( textureFormat_t format, int width, int height ) {
 	if ( width <= 0 || height <= 0 ) {
 		return 0;
 	}
 
-	int bytesPerBlock = 0;
-	switch ( format ) {
-		case FMT_DXT1:
-			bytesPerBlock = 8;
-			break;
-		case FMT_DXT5:
-		case FMT_BC7:
-			bytesPerBlock = 16;
-			break;
-		default:
-			idLib::Error( "Invalid compressed texture format %d", format );
+	// shared with the cache-file validator in BinaryImage.cpp, so the two cannot
+	// drift about how large a compressed level is
+	const int bytesPerBlock = BytesPerBlockForFormat( format );
+	if ( bytesPerBlock <= 0 ) {
+		idLib::Error( "Invalid compressed texture format %d", format );
 	}
 
 	const int64 blocksWide = Max( (int64)1, ( (int64)width + 3 ) >> 2 );
@@ -469,6 +475,31 @@ void idImage::AllocImage() {
 			break;
 		}
 		internalFormat = GL_COMPRESSED_RGBA_BPTC_UNORM;
+		dataFormat = GL_RGBA;
+		dataType = GL_UNSIGNED_BYTE;
+		break;
+	case FMT_ETC2_RGB8:
+	case FMT_ETC2_RGBA8:
+	case FMT_EAC_RG11:
+		if ( !glConfig.etc2TextureCompressionAvailable ) {
+			// Same shape as the BC7 gate above: degrade one texture rather than
+			// take the session down from inside a mid-load upload. Reaching here
+			// means a generated cache file outlived the context that produced
+			// it, which R_BinaryImageHeaderSupportedByRenderer should have
+			// caught first.
+			common->Warning( "%s holds ETC2/EAC data but this renderer does not expose ETC2; uploading as uncompressed RGBA8", GetName() );
+			internalFormat = GL_RGBA8;
+			dataFormat = GL_RGBA;
+			dataType = GL_UNSIGNED_BYTE;
+			break;
+		}
+		if ( opts.format == FMT_ETC2_RGB8 ) {
+			internalFormat = GL_COMPRESSED_RGB8_ETC2;
+		} else if ( opts.format == FMT_ETC2_RGBA8 ) {
+			internalFormat = GL_COMPRESSED_RGBA8_ETC2_EAC;
+		} else {
+			internalFormat = GL_COMPRESSED_RG11_EAC;
+		}
 		dataFormat = GL_RGBA;
 		dataType = GL_UNSIGNED_BYTE;
 		break;

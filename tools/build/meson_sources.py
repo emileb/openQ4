@@ -79,6 +79,7 @@ IMAGETOOLS_SOURCE_GLOBS = [
     "imagetools/*.cpp",
     "imagetools/Color/*.cpp",
     "imagetools/DXT/*.cpp",
+    "imagetools/ETC/*.cpp",
     "imagetools/jpeg-6/*.c",
 ]
 

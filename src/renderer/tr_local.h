@@ -1328,6 +1328,7 @@ extern idCVar r_skipROQ;
 
 extern idCVar r_ignoreGLErrors;
 extern idCVar image_ignoreHighQuality;
+extern idCVar image_useETC2;			// compress to ETC2 where the driver exposes no S3TC
 
 extern idCVar r_forceLoadImages;		// draw all images to screen after registration
 extern idCVar r_demonstrateBug;			// used during development to show IHV's their problems
