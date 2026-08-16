@@ -1495,6 +1495,7 @@ private:
 	static idCVar			fs_basepath;
 	static idCVar			fs_homepath;
 	static idCVar			fs_savepath;
+	static idCVar			fs_cachepath;
 	static idCVar			fs_cdpath;
 	static idCVar			fs_game;
 	static idCVar			fs_game_base;
@@ -1586,6 +1587,13 @@ idCVar	idFileSystemLocal::fs_copyfiles( "fs_copyfiles", "0", CVAR_SYSTEM | CVAR_
 idCVar	idFileSystemLocal::fs_basepath( "fs_basepath", "", CVAR_SYSTEM | CVAR_INIT, "" );
 idCVar	idFileSystemLocal::fs_homepath( "fs_homepath", "", CVAR_SYSTEM | CVAR_INIT, "" );
 idCVar	idFileSystemLocal::fs_savepath( "fs_savepath", "", CVAR_SYSTEM | CVAR_INIT, "" );
+// Regenerable data only: the generated/ tree (binary image and sound caches).
+// Empty means "write it to fs_savepath", which is where it went before this
+// existed, so leaving it unset changes nothing. Hosts that have a directory the
+// OS may reclaim -- Android's getCacheDir(), XDG_CACHE_HOME -- should point this
+// there, because a purged cache costs a slow reload and nothing else, while a
+// purged savepath costs the player their config and saves.
+idCVar	idFileSystemLocal::fs_cachepath( "fs_cachepath", "", CVAR_SYSTEM | CVAR_INIT, "regenerable cache directory for the generated/ tree; empty uses fs_savepath" );
 idCVar	idFileSystemLocal::fs_cdpath( "fs_cdpath", "", CVAR_SYSTEM | CVAR_INIT, "" );
 idCVar	idFileSystemLocal::fs_game( "fs_game", OPENQ4_GAMEDIR, CVAR_SYSTEM | CVAR_INIT | CVAR_SERVERINFO, "mod path" );
 idCVar  idFileSystemLocal::fs_game_base( "fs_game_base", "", CVAR_SYSTEM | CVAR_INIT | CVAR_SERVERINFO, "alternate mod path, searched after the main fs_game path, before the basedir" );
@@ -4706,6 +4714,14 @@ idFileSystemLocal::SetupGameDirectories
 ================
 */
 void idFileSystemLocal::SetupGameDirectories( const char *gameName ) {
+	// Cache first, so it ends up with the *lowest* search priority: entries are
+	// prepended, so whatever is added last wins. Nothing in the cache should
+	// ever shadow real game data -- it only holds generated/, which no pk4
+	// provides -- and this way a stale cache cannot mask a content update.
+	if ( fs_cachepath.GetString()[0] ) {
+		AddGameDirectory( fs_cachepath.GetString(), gameName );
+	}
+
 	// setup savepath
 	if ( fs_savepath.GetString()[0] ) {
 		AddGameDirectory( fs_savepath.GetString(), gameName );
@@ -5982,14 +5998,23 @@ void idFileSystemLocal::Init( void ) {
 	if ( fs_savepath.GetString()[0] == '\0' ) {
 		fs_savepath.SetString( fs_homepath.GetString() );
 	}
+	// Resolving this to fs_savepath rather than leaving it empty keeps the log
+	// honest about where the generated/ tree actually lands. It also costs
+	// nothing when the two are equal: SetupGameDirectories adds the cache first
+	// and AddGameDirectory ignores a duplicate path, so the search order comes
+	// out exactly as it did before.
+	if ( fs_cachepath.GetString()[0] == '\0' ) {
+		fs_cachepath.SetString( fs_savepath.GetString() );
+	}
 	// fs_cdpath is locked to the platform content root (the app's Resources
 	// directory on macOS, otherwise the process current directory).
 	fs_cdpath.SetString( Sys_DefaultCDPath() );
 	common->Printf(
-		"Filesystem paths: fs_basepath='%s' fs_homepath='%s' fs_savepath='%s' fs_cdpath='%s' fs_game='%s' fs_game_base='%s'\n",
+		"Filesystem paths: fs_basepath='%s' fs_homepath='%s' fs_savepath='%s' fs_cachepath='%s' fs_cdpath='%s' fs_game='%s' fs_game_base='%s'\n",
 		fs_basepath.GetString(),
 		fs_homepath.GetString(),
 		fs_savepath.GetString(),
+		fs_cachepath.GetString(),
 		fs_cdpath.GetString(),
 		fs_game.GetString(),
 		fs_game_base.GetString() );

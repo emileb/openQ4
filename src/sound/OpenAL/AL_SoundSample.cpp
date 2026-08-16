@@ -309,7 +309,11 @@ void idSoundSample_OpenAL::WriteAllSamples( const idStr& sampleName )
 
 		if( samplePC->LoadWav( inName ) || samplePC->LoadWav( inName2 ) )
 		{
-			idFile* fileOut = fileSystem->OpenFileWrite( outName, "fs_basepath" );
+			// the generated/ tree is regenerable cache, and fs_basepath is
+			// commonly the read-only game install (SAF-backed storage on
+			// Android, Program Files on Windows); fs_cachepath is always
+			// writable and falls back to fs_savepath when the host leaves it unset
+			idFile* fileOut = fileSystem->OpenFileWrite( outName, "fs_cachepath" );
 			samplePC->WriteGeneratedSample( fileOut );
 			delete fileOut;
 		}
