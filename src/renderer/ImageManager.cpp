@@ -362,7 +362,30 @@ void idImageManager::CheckCvars() {
 
 	if ( reductionChanged ) {
 		common->Printf( "Texture reduction changed, reloading images...\n" );
-		ReloadImages( true );
+
+		// Everything except the runtime pages. An isPersistant image is a render
+		// target or a TTF glyph atlas: not file backed, and sized by the code that
+		// made it rather than by the reduction cvars. idImage::Reload answers that
+		// case by reallocating the image empty and returning, so including them
+		// here cannot apply the new setting, and it silently destroys the glyph
+		// atlases -- every string in the menus and the HUD goes blank until the
+		// process restarts, because nothing rebuilds a scratch page.
+		//
+		// It surfaced as a first-run bug: the launcher passes a texture-detail
+		// setting the archived config does not have yet, this fires once, and by
+		// the second launch the value matches and it never fires again. Whether the
+		// blanking is even visible depends on whether the reload lands before or
+		// after the fonts are built, which is a race, which is why it looked
+		// intermittent and unrelated to the setting that caused it.
+		//
+		// vid_restart still goes through ReloadImages and reallocates every render
+		// target, which is where that genuinely belongs.
+		for ( int i = 0; i < images.Num(); i++ ) {
+			if ( images[i]->GetOpts().isPersistant ) {
+				continue;
+			}
+			images[i]->Reload( true );
+		}
 		return;
 	}
 
