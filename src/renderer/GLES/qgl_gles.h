@@ -331,6 +331,14 @@ void GLES_DrawBuffer( GLenum buffer );					// -> glDrawBuffers( 1, &buffer )
 #define glDepthRange					GLES_DepthRange
 #define glDrawBuffer					GLES_DrawBuffer
 
+// ES has no glGetTexImage at all. The light-image atlas
+// (ModernLightImageAtlas.cpp) probes the entry point for NULL before its CPU
+// readback path -- written for pointer-loaded GL, where a driver without the
+// export presents exactly this way. A null pointer here lets that probe do the
+// disabling; the call after it compiles as an (unreachable) indirect call.
+typedef void ( *PFN_GLES_GetTexImage )( GLenum target, GLint level, GLenum format, GLenum type, void *pixels );
+#define glGetTexImage					( ( PFN_GLES_GetTexImage )0 )
+
 /*
 ===============================================================================
 	ARB object-model calls with no 1:1 ES mapping.

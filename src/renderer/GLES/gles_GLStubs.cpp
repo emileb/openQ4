@@ -248,4 +248,26 @@ void GL_APIENTRY glOrtho( GLdouble l, GLdouble r, GLdouble b, GLdouble t, GLdoub
 	(void)l; (void)r; (void)b; (void)t; (void)n; (void)f;
 }
 
+// The underwater view is a GL back-end post-process pass built on an arbitrary
+// GLSL program in the excluded draw_common.cpp. Same contract as the Vulkan
+// module's stub (vk_GLStubs.cpp): report the effect unavailable and the game
+// falls back to a flat wash.
+bool RB_UnderwaterViewAvailable( void ) {
+	return false;
+}
+
+// Ownership query for the modern light-grid pipeline, whose real answer lives
+// in the excluded draw_common.cpp with a subtree of helpers behind it.
+// Answering "not representable" keeps such surfaces on the per-surface
+// fallback path, which is this module's standing contract for anything the
+// standalone backend cannot own.
+struct drawSurf_s;
+bool RB_LightGridSurfaceModernRepresentable( const struct drawSurf_s *surf, const struct viewDef_s *viewDef, const char **reason ) {
+	( void )surf; ( void )viewDef;
+	if ( reason != NULL ) {
+		*reason = "gles-module-no-lightgrid-classifier";
+	}
+	return false;
+}
+
 #endif /* OPENQ4_RENDERER_GLES_MODULE */
