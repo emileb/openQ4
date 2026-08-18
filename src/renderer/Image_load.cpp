@@ -674,9 +674,13 @@ void idImage::ActuallyLoadImage( bool fromBackEnd ) {
 			common->Printf( "generated cache hit %s\n", generatedName.c_str() );
 		}
 	}
-	if ( ( fileSystem->InProductionMode() && binaryImageAvailable ) || ( binaryImageAvailable
-		&& R_GeneratedImageHeaderMatchesDerivedOpts( im.GetFileHeader(), opts, usage )
-		) ) {
+	// The opts check stays on in production mode. It costs nothing -- the header
+	// is already in memory -- and the generated file name does not encode the
+	// texture format, so it is the only thing that notices when a cvar such as
+	// image_useETC2 changes what DeriveOpts just asked for. Skipping it made a
+	// format change silently reuse cache entries written in the old format.
+	// Production mode is meant to skip source timestamp validation, nothing else.
+	if ( binaryImageAvailable && R_GeneratedImageHeaderMatchesDerivedOpts( im.GetFileHeader(), opts, usage ) ) {
 		const bimageFile_t & header = im.GetFileHeader();
 		opts.width = header.width;
 		opts.height = header.height;
