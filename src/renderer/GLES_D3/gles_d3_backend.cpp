@@ -440,7 +440,7 @@ void RB_GLESD3_DrawView( void ) {
 		// that surface's screen rect, while the main view gets the whole
 		// viewport. A box anchored to world geometry is that rect.
 		common->Printf( "glesd3 %s view %i: viewport=%i,%i %ix%i scissor=%i,%i..%i,%i "
-				"isSubview=%i target=%i surfs=%i lights=%s "
+				"isSubview=%i portalSky=%i target=%i surfs=%i lights=%s "
 				"afterClear[ %s] entryErr=0x%04x err=0x%04x\n",
 				is3D ? "3d" : "2d",
 				is3D ? rb_glesD3Reported3DViews : rb_glesD3Reported2DViews,
@@ -450,6 +450,12 @@ void RB_GLESD3_DrawView( void ) {
 				backEnd.viewDef->scissor.x1, backEnd.viewDef->scissor.y1,
 				backEnd.viewDef->scissor.x2, backEnd.viewDef->scissor.y2,
 				backEnd.viewDef->isSubview ? 1 : 0,
+				// A portal sky is a top-level view, NOT a subview: the game emits
+				// it as its own RenderScene immediately before the view it backs.
+				// Reading isSubview=0 and concluding "this is the main view" is
+				// wrong on any map with a sky, and cost a wrong resolution-scale
+				// resolve that upscaled the sky twice.
+				( backEnd.viewDef->renderFlags & RF_PORTAL_SKY ) != 0 ? 1 : 0,
 				backEnd.renderTexture != NULL ? (int)backEnd.renderTexture->GetDeviceHandle() : 0,
 				backEnd.viewDef->numDrawSurfs,
 				backEnd.viewDef->viewLights ? "yes" : "no",
@@ -522,6 +528,11 @@ void RB_GLESD3_DrawView( void ) {
 	}
 
 	if ( is3D ) {
+		// Before the present, not after: the crop is resolved INSIDE the bound
+		// target, and RB_GLESD3_PresentSceneTarget copies that target to the back
+		// buffer. Resolving afterwards would present the un-upscaled corner and
+		// leave the fix visible only to whatever sampled the target later.
+		RB_GLES_ResolveSceneResolutionScale();
 		RB_GLESD3_PresentSceneTarget();
 	}
 

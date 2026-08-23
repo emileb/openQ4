@@ -37,6 +37,11 @@ already filtered out.
 */
 void RB_GLESD3_DrawView( void );
 
+// Defined in GLES/gles_Backend.cpp, next to the scratch target it owns. Resolves
+// the r_screenFraction crop inside whatever framebuffer is bound, so it has to
+// run before anything presents or samples that framebuffer.
+void RB_GLES_ResolveSceneResolutionScale( void );
+
 /*
 ====================
 RB_GLESD3_Active

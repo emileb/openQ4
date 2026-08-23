@@ -652,7 +652,7 @@ idCVar r_useCombinerDisplayLists( "r_useCombinerDisplayLists", "1", CVAR_RENDERE
 idCVar r_useDepthBoundsTest( "r_useDepthBoundsTest", "1", CVAR_RENDERER | CVAR_BOOL, "use depth bounds test to reduce shadow fill" );
 
 idCVar r_screenFraction( "r_screenFraction", "100", CVAR_ARCHIVE | CVAR_RENDERER | CVAR_INTEGER, "main-scene resolution scale percentage; values above 100 enable offscreen supersampling", 10, 200 );
-idCVar r_resolutionScaleMode( "r_resolutionScaleMode", "1", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_INTEGER, "screen-fraction mode below native resolution: 0 = legacy cropped viewport, 1 = bilinear upscale, 2 = high-quality upscale; supersampling uses the scene-target resolve path", 0, 2, idCmdSystem::ArgCompletion_Integer<0,2> );
+idCVar r_resolutionScaleMode( "r_resolutionScaleMode", "1", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_INTEGER, "screen-fraction mode below native resolution: 0 = legacy cropped viewport, 1 = bilinear upscale, 2 = high-quality upscale; supersampling uses the scene-target resolve path. On OpenGL ES both 1 and 2 crop the world render and blit it back out bilinear, leaving the HUD and menus at native resolution", 0, 2, idCmdSystem::ArgCompletion_Integer<0,2> );
 idCVar r_resolutionScaleSharpness( "r_resolutionScaleSharpness", "0.4", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_FLOAT, "sharpening amount for high-quality resolution scaling", 0.0f, 1.5f );
 idCVar r_demonstrateBug( "r_demonstrateBug", "0", CVAR_RENDERER | CVAR_BOOL, "used during development to show IHV's their problems" );
 idCVar r_usePortals( "r_usePortals", "1", CVAR_RENDERER | CVAR_BOOL, " 1 = use portals to perform area culling, otherwise draw everything" );
@@ -5147,6 +5147,10 @@ void idRenderSystemLocal::Clear( void ) {
 	stencilDecr = 0;
 	memset( renderCrops, 0, sizeof( renderCrops ) );
 	currentRenderCrop = 0;
+	resolutionScaleCropActive = false;
+	resolutionScaleWidth = 0;
+	resolutionScaleHeight = 0;
+	resolutionScaleSuppressed = false;
 	guiRecursionLevel = 0;
 	guiModel = NULL;
 	demoGuiModel = NULL;

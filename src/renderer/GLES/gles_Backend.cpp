@@ -74,6 +74,8 @@ void RB_DrawView( const void *data ) {
 	if ( RB_GLESD3_Active() ) {
 		// gles_d3 renders the view itself, the way RB_STD_DrawView does on
 		// desktop. This is the backend's only seam into the shared frame loop.
+		// It resolves the r_screenFraction crop itself, because it has to do so
+		// ahead of its own scene-target present.
 		RB_GLESD3_DrawView();
 		return;
 	}
@@ -81,6 +83,7 @@ void RB_DrawView( const void *data ) {
 	// The legacy scene render would run here. On ES the modern executor owns
 	// the passes; anything it does not own is simply not drawn, which is the
 	// standalone-backend contract.
+	RB_GLES_ResolveSceneResolutionScale();
 }
 
 /*
@@ -97,13 +100,225 @@ void RB_DrawSpecialEffects( const void *data ) {
 
 /*
 ====================
+RB_GLES_ResolveSceneResolutionScale
+
+The second half of r_screenFraction on ES, and the only half that was not
+already written.
+
+r_screenFraction had no implementation here at all. Modes 1 and 2 live in
+draw_common.cpp, one of the TUs this module drops, and the frame this module
+actually draws never read the cvar -- `+set r_screenFraction 25` reached the
+engine, passed its range check, and changed nothing on screen. Mode 0 was the
+only path in shared code, and it crops the frame without ever upscaling it,
+which is a fill-rate measurement rather than a player setting.
+
+idRenderSystemLocal::PushSceneResolutionScale crops the world render, so the
+scene arrives here in the bottom-left corner of whatever target is bound, at
+resolutionScaleWidth x resolutionScaleHeight. This puts it back over the view's
+native extents. It runs at the end of the scene view rather than at swap time
+because the HUD is drawn after the scene and must not be caught by it.
+
+Two blits through a scratch target, not one. The corner and the full viewport
+are the same framebuffer, and glBlitFramebuffer between overlapping regions of
+one framebuffer is undefined in ES 3.0 -- the driver may read texels the call
+has already written. The scratch renderbuffer breaks that aliasing; it is
+allocated at the cropped size, so at 50% it is a quarter of the display and both
+blits together cost far less than the pixels the crop saved.
+
+Filtering is GL_LINEAR on the upscale only. The 1:1 copy in has nothing to
+interpolate.
+====================
+*/
+static GLuint rb_glesResolutionScaleFbo = 0;
+static GLuint rb_glesResolutionScaleColor = 0;
+static int rb_glesResolutionScaleWidth = 0;
+static int rb_glesResolutionScaleHeight = 0;
+static bool rb_glesResolutionScaleUnavailable = false;
+
+/*
+====================
+RB_GLES_AbandonSceneResolutionScale
+
+The crop is pushed by the front end and this pass is the only thing that
+resolves it. Refusing to run without also stopping the crop leaves the scene in
+the bottom-left corner of the display -- precisely the legacy mode 0 artifact
+this pass exists to remove, arrived at from the other direction. Measured on an
+SM-S928B: the multisample guard below fired, the crop kept being pushed, and the
+frame sat at 50% in the corner for the rest of the session.
+
+So the refusal has to travel back to PushSceneResolutionScale. The frame that
+discovers it is already committed; every frame after it renders unscaled.
+====================
+*/
+static void RB_GLES_AbandonSceneResolutionScale( void ) {
+	rb_glesResolutionScaleUnavailable = true;
+	tr.resolutionScaleSuppressed = true;
+}
+
+static bool RB_GLES_EnsureResolutionScaleTarget( int width, int height ) {
+	if ( rb_glesResolutionScaleFbo != 0
+			&& rb_glesResolutionScaleWidth == width
+			&& rb_glesResolutionScaleHeight == height ) {
+		return true;
+	}
+
+	if ( rb_glesResolutionScaleFbo != 0 ) {
+		glDeleteFramebuffers( 1, &rb_glesResolutionScaleFbo );
+		rb_glesResolutionScaleFbo = 0;
+	}
+	if ( rb_glesResolutionScaleColor != 0 ) {
+		glDeleteRenderbuffers( 1, &rb_glesResolutionScaleColor );
+		rb_glesResolutionScaleColor = 0;
+	}
+	rb_glesResolutionScaleWidth = 0;
+	rb_glesResolutionScaleHeight = 0;
+
+	glGenRenderbuffers( 1, &rb_glesResolutionScaleColor );
+	glBindRenderbuffer( GL_RENDERBUFFER, rb_glesResolutionScaleColor );
+	glRenderbufferStorage( GL_RENDERBUFFER, GL_RGBA8, width, height );
+	glBindRenderbuffer( GL_RENDERBUFFER, 0 );
+
+	glGenFramebuffers( 1, &rb_glesResolutionScaleFbo );
+	glBindFramebuffer( GL_FRAMEBUFFER, rb_glesResolutionScaleFbo );
+	glFramebufferRenderbuffer( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, rb_glesResolutionScaleColor );
+	const GLenum status = glCheckFramebufferStatus( GL_FRAMEBUFFER );
+	glBindFramebuffer( GL_FRAMEBUFFER, 0 );
+
+	if ( status != GL_FRAMEBUFFER_COMPLETE ) {
+		common->Warning( "r_screenFraction: %ix%i upscale target incomplete (0x%04x); scaling disabled.",
+				width, height, status );
+		glDeleteFramebuffers( 1, &rb_glesResolutionScaleFbo );
+		glDeleteRenderbuffers( 1, &rb_glesResolutionScaleColor );
+		rb_glesResolutionScaleFbo = 0;
+		rb_glesResolutionScaleColor = 0;
+		return false;
+	}
+
+	rb_glesResolutionScaleWidth = width;
+	rb_glesResolutionScaleHeight = height;
+	return true;
+}
+
+void RB_GLES_ResolveSceneResolutionScale( void ) {
+	if ( rb_glesResolutionScaleUnavailable || backEnd.viewDef == NULL ) {
+		return;
+	}
+
+	// The scene view only. Mirror and portal subviews render into the same crop
+	// and are resolved along with the view they belong to; 2D views are outside
+	// the crop entirely, which is what keeps the HUD and the menus sharp.
+	if ( backEnd.viewDef->viewEntitys == NULL || backEnd.viewDef->isSubview ) {
+		return;
+	}
+
+	// A portal sky is NOT a subview. The game emits it as its own top-level
+	// RenderScene, with its own crop, into the same target immediately before the
+	// view it backs -- so it arrives here looking exactly like a main view.
+	//
+	// Resolving after it upscales the sky on its own; the main view then draws
+	// into the crop over an already-upscaled backdrop, and the second resolve
+	// magnifies that corner again. The sky comes out enlarged by the scale factor
+	// a second time and pans at that multiple when the camera turns: at 25% it
+	// reads as a sky four times too big moving four times too fast. Measured on
+	// game/airdefense1, and it is the reason the report above prints portalSky.
+	//
+	// Skipping it is the whole fix: the sky stays in the crop, the main view
+	// draws over it there, and one resolve at the end lifts both out together.
+	if ( ( backEnd.viewDef->renderFlags & RF_PORTAL_SKY ) != 0 ) {
+		return;
+	}
+
+	const int displayWidth = glConfig.vidWidth;
+	const int displayHeight = glConfig.vidHeight;
+	const int sourceWidth = Min( backEnd.resolutionScaleWidth, displayWidth );
+	const int sourceHeight = Min( backEnd.resolutionScaleHeight, displayHeight );
+	if ( sourceWidth <= 0 || sourceHeight <= 0 ) {
+		return;
+	}
+	if ( sourceWidth == displayWidth && sourceHeight == displayHeight ) {
+		return;
+	}
+
+	GLint previousFbo = 0;
+	glGetIntegerv( GL_FRAMEBUFFER_BINDING, &previousFbo );
+
+	// A multisampled draw framebuffer cannot receive a blit on ES 3.0, and there
+	// is no cheap way around it here. Report once and stay out of the way rather
+	// than raising GL_INVALID_OPERATION every frame.
+	//
+	// SAMPLE_BUFFERS, not SAMPLES. SAMPLES is what the driver would use if there
+	// were a sample buffer, and it is free to report a count when there is none:
+	// an SM-S928B answers SAMPLE_BUFFERS=0 SAMPLES=4 for a window created with
+	// r_multiSamples 4 and no multisample config available. Reading SAMPLES there
+	// disabled scaling on a framebuffer that was single-sampled all along, which
+	// is how this pass first shipped broken on device. The blit restriction is
+	// written against SAMPLE_BUFFERS and so is this test.
+	GLint sampleBuffers = 0;
+	glGetIntegerv( GL_SAMPLE_BUFFERS, &sampleBuffers );
+	if ( sampleBuffers > 0 ) {
+		common->Warning( "r_screenFraction: the scene target is multisampled, which cannot receive a blit on ES; scaling disabled." );
+		RB_GLES_AbandonSceneResolutionScale();
+		return;
+	}
+
+	if ( !RB_GLES_EnsureResolutionScaleTarget( sourceWidth, sourceHeight ) ) {
+		RB_GLES_AbandonSceneResolutionScale();
+		glBindFramebuffer( GL_FRAMEBUFFER, (GLuint)previousFbo );
+		return;
+	}
+
+	// Both blits are clipped by the draw framebuffer's scissor, and the view ends
+	// with whatever box its last surface set.
+	const bool scissorWasEnabled = glIsEnabled( GL_SCISSOR_TEST ) == GL_TRUE;
+	if ( scissorWasEnabled ) {
+		glDisable( GL_SCISSOR_TEST );
+	}
+	glColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE );
+
+	const GLenum sourceReadBuffer = ( previousFbo == 0 ) ? GL_BACK : GL_COLOR_ATTACHMENT0;
+
+	glBindFramebuffer( GL_READ_FRAMEBUFFER, (GLuint)previousFbo );
+	glReadBuffer( sourceReadBuffer );
+	glBindFramebuffer( GL_DRAW_FRAMEBUFFER, rb_glesResolutionScaleFbo );
+	glBlitFramebuffer( 0, 0, sourceWidth, sourceHeight,
+			0, 0, sourceWidth, sourceHeight,
+			GL_COLOR_BUFFER_BIT, GL_NEAREST );
+
+	glBindFramebuffer( GL_READ_FRAMEBUFFER, rb_glesResolutionScaleFbo );
+	glReadBuffer( GL_COLOR_ATTACHMENT0 );
+	glBindFramebuffer( GL_DRAW_FRAMEBUFFER, (GLuint)previousFbo );
+	glBlitFramebuffer( 0, 0, sourceWidth, sourceHeight,
+			0, 0, displayWidth, displayHeight,
+			GL_COLOR_BUFFER_BIT, GL_LINEAR );
+
+	glBindFramebuffer( GL_READ_FRAMEBUFFER, (GLuint)previousFbo );
+	glReadBuffer( sourceReadBuffer );
+	if ( scissorWasEnabled ) {
+		glEnable( GL_SCISSOR_TEST );
+	}
+	glBindFramebuffer( GL_FRAMEBUFFER, (GLuint)previousFbo );
+
+	// glColorMask was issued behind GL_State's back, the same way
+	// RB_ForceOpaquePresentAlpha does it, so the cached mask bits no longer
+	// describe the driver.
+	backEnd.glState.forceGlState = true;
+}
+
+/*
+====================
 Legacy back-buffer post
 
 Resolution scaling, CRT emulation and colour mapping are all implemented in
-draw_common.cpp against fixed-function state. They are cosmetic passes over
-the finished frame; leaving them out costs those effects and nothing else.
+draw_common.cpp against fixed-function state. The CRT and colour-mapping ones
+are cosmetic passes over the finished frame; leaving them out costs those
+effects and nothing else.
+
+Resolution scaling is not cosmetic, and this module implements it for real in
+RB_GLES_ResolveSceneResolutionScale above -- scoped to the scene view, where it
+can leave the HUD alone. Nothing is left to do at swap time.
 ====================
 */
+
 void RB_ApplyResolutionScaleToBackBuffer( void ) {
 }
 

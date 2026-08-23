@@ -731,6 +731,8 @@ typedef struct {
 	idRenderTexture		*renderTexture;
 	idRenderTexture		*feedbackRenderTexture;	// active scene target allowed to feed _currentRender
 	idVec4				postProcessTexelSize;	// x/y = inverse source size, z/w = source size
+	int					resolutionScaleWidth;	// crop this frame rendered into, 0 when unscaled
+	int					resolutionScaleHeight;
 	idVec4				postProcessSourceColorSpace;	// x = contract enum, y = display gamma, z/w reserved
 	idVec4				postProcessSMAAQuality;	// x = edge mode, y = threshold, z = search steps, w = local contrast
 
@@ -982,6 +984,20 @@ public:
 
 	renderCrop_t			renderCrops[MAX_RENDER_CROPS];
 	int						currentRenderCrop;
+
+	// r_screenFraction below native, on a back end that can upscale the finished
+	// frame. BeginFrame pushes a crop the whole frame renders into, and the back
+	// end blits that corner out to the full back buffer before the swap.
+	// Zero means no scaling crop is live this frame.
+	bool					resolutionScaleCropActive;
+	int						resolutionScaleWidth;
+	int						resolutionScaleHeight;
+	// latched once the game routes a frame through an offscreen scene target,
+	// where a whole-frame crop cannot be resolved back to full screen
+	bool					resolutionScaleSuppressed;
+
+	bool					PushSceneResolutionScale( void );
+	void					PopSceneResolutionScale( void );
 
 	// GUI drawing variables for surface creation
 	int						guiRecursionLevel;		// to prevent infinite overruns
