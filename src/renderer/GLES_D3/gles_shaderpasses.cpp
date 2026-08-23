@@ -1291,6 +1291,43 @@ static void RB_GLESD3_T_RenderShaderPasses( const drawSurf_t *surf ) {
 		}
 
 		if ( pStage->newStage != NULL ) {
+			// r_skipNewAmbient, mirroring draw_common.cpp:7262.
+			//
+			// Two exemptions carried across with it. SS_POST_PROCESS materials
+			// still draw: the cvar suppresses world and material ambient
+			// programs, and taking the fullscreen post chain out with them is
+			// not what it means. And customLighting stages are outside its
+			// scope entirely -- the interaction pass owns those, so this pass
+			// declining them is already correct and is already counted below;
+			// letting the cvar short-circuit them would only hide that from the
+			// counter.
+			//
+			// Not recorded as a skip. The counters exist to expose stages this
+			// backend cannot draw, and a stage switched off by a debug cvar is
+			// not one of those -- the same reasoning as the condition-register
+			// test at the top of the loop.
+			//
+			// Expect this to change nothing on retail Quake 4 content, and do
+			// not read that as the cvar being broken. Material.cpp:3217 forces
+			// sort = SS_POST_PROCESS on any material whose program samples a
+			// scene-capture image, and every program material the game actually
+			// places is a _currentRender heat haze -- so the exemption above
+			// covers all of them. Measured on mp/q4xdm14: 5885 newStage stages
+			// reached this point, every one of them sort=100, none suppressed.
+			// The only bumpyEnvironment materials in the pk4s are shaderDemos
+			// and gfx/effects/test*, which no map references. The ARB2 path has
+			// the same exemption and is equally inert; this is parity, not a
+			// performance lever.
+			//
+			// Placed after the _currentRender capture above, deliberately: a
+			// stage that is not drawn can still be the reason a later stage has
+			// something to sample.
+			if ( !pStage->newStage->customLighting
+					&& r_skipNewAmbient.GetBool()
+					&& shader->GetSort() < SS_POST_PROCESS ) {
+				continue;
+			}
+
 			const glesD3MaterialProgram_t matProgram =
 					pStage->newStage->customLighting
 						? GLESD3_MATPROG_NONE
