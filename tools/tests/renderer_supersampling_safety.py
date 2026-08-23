@@ -91,6 +91,25 @@ def test_es_resolution_scale_is_scoped_to_the_scene():
     )
 
 
+def test_nearest_neighbour_upscale_mode_is_reachable():
+    init_cpp = read_repo_file(Path("src") / "renderer" / "RenderSystem_init.cpp")
+    draw_common = read_repo_file(Path("src") / "renderer" / "draw_common.cpp")
+    gles_backend = read_repo_file(Path("src") / "renderer" / "GLES" / "gles_Backend.cpp")
+
+    assert_true(
+        "0, 3, idCmdSystem::ArgCompletion_Integer<0,3>" in init_cpp,
+        "r_resolutionScaleMode should expose the nearest-neighbour mode",
+    )
+    assert_true(
+        "idMath::ClampInt( 0, 3, r_resolutionScaleMode.GetInteger() )" in draw_common,
+        "the desktop path must not clamp mode 3 down to 2, which would switch its sharpening on",
+    )
+    assert_true(
+        "RB_RESOLUTION_SCALE_MODE_NEAREST" in gles_backend and "upscaleFilter" in gles_backend,
+        "the ES upscale should pick its blit filter from the scale mode",
+    )
+
+
 def test_scene_target_supersampling_is_guarded_and_scales_clipping():
     draw_common = read_repo_file(Path("src") / "renderer" / "draw_common.cpp")
 
@@ -110,6 +129,7 @@ def main():
     test_cvar_and_menu_expose_safe_supersampling_range()
     test_legacy_crop_does_not_run_above_native()
     test_es_resolution_scale_is_scoped_to_the_scene()
+    test_nearest_neighbour_upscale_mode_is_reachable()
     test_scene_target_supersampling_is_guarded_and_scales_clipping()
     print("renderer_supersampling_safety: ok")
     return 0

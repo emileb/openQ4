@@ -125,10 +125,16 @@ has already written. The scratch renderbuffer breaks that aliasing; it is
 allocated at the cropped size, so at 50% it is a quarter of the display and both
 blits together cost far less than the pixels the crop saved.
 
-Filtering is GL_LINEAR on the upscale only. The 1:1 copy in has nothing to
-interpolate.
+Filtering is chosen by r_resolutionScaleMode: 3 points the upscale at
+GL_NEAREST, anything else uses GL_LINEAR. Bilinear at a quarter resolution reads
+as mud on a phone panel, and nearest at a whole-number fraction is just pixel
+doubling, which stays legible. The 1:1 copy in is always GL_NEAREST -- it has
+nothing to interpolate.
 ====================
 */
+// r_resolutionScaleMode value that asks for a point-filtered upscale
+static const int RB_RESOLUTION_SCALE_MODE_NEAREST = 3;
+
 static GLuint rb_glesResolutionScaleFbo = 0;
 static GLuint rb_glesResolutionScaleColor = 0;
 static int rb_glesResolutionScaleWidth = 0;
@@ -284,12 +290,15 @@ void RB_GLES_ResolveSceneResolutionScale( void ) {
 			0, 0, sourceWidth, sourceHeight,
 			GL_COLOR_BUFFER_BIT, GL_NEAREST );
 
+	const GLenum upscaleFilter =
+		( r_resolutionScaleMode.GetInteger() == RB_RESOLUTION_SCALE_MODE_NEAREST ) ? GL_NEAREST : GL_LINEAR;
+
 	glBindFramebuffer( GL_READ_FRAMEBUFFER, rb_glesResolutionScaleFbo );
 	glReadBuffer( GL_COLOR_ATTACHMENT0 );
 	glBindFramebuffer( GL_DRAW_FRAMEBUFFER, (GLuint)previousFbo );
 	glBlitFramebuffer( 0, 0, sourceWidth, sourceHeight,
 			0, 0, displayWidth, displayHeight,
-			GL_COLOR_BUFFER_BIT, GL_LINEAR );
+			GL_COLOR_BUFFER_BIT, upscaleFilter );
 
 	glBindFramebuffer( GL_READ_FRAMEBUFFER, (GLuint)previousFbo );
 	glReadBuffer( sourceReadBuffer );
