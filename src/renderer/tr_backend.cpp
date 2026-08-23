@@ -946,6 +946,8 @@ void RB_ExecuteBackEndCommands( const emptyCommand_t *cmds ) {
 	RB_SetDefaultGLState();
 	backEnd.renderTexture = NULL;
 	backEnd.postProcessTexelSize = tr.postProcessTexelSize;
+	backEnd.resolutionScaleWidth = tr.resolutionScaleWidth;
+	backEnd.resolutionScaleHeight = tr.resolutionScaleHeight;
 	backEnd.postProcessSourceColorSpace = tr.postProcessSourceColorSpace;
 	backEnd.postProcessSMAAQuality = tr.postProcessSMAAQuality;
 	idRenderTexture::BindNull();
