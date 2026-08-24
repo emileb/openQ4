@@ -135,6 +135,34 @@ nor the fix.
 static idCVar r_glesD3SkipMaterial( "r_glesD3SkipMaterial", "", CVAR_RENDERER,
 		"gles_d3: skip material-pass surfaces whose material name contains this substring" );
 
+/*
+====================
+r_glesD3SkipMaterialPrograms
+
+Turns the material-program stages this backend can draw -- heat haze, masked
+heat haze, bumpy environment, monochrome -- off, as a player setting rather than
+a bisect tool.
+
+Separate from r_skipNewAmbient rather than folded into it, because that cvar
+cannot reach these stages and is not meant to. Its exemption is
+`sort < SS_POST_PROCESS`, and Material.cpp:3217 forces SS_POST_PROCESS onto any
+material whose program samples a scene-capture image -- which every program
+material Quake 4 places does. Measured on mp/q4xdm14: 5885 newStage stages, all
+sort=100, none reachable by r_skipNewAmbient. Widening that cvar instead would
+have made the same name mean two different things on two renderers.
+
+The saving is mostly NOT the haze draws. It is the fullscreen _currentRender
+copy they force: a material sorted at SS_POST_PROCESS stops the surface walk
+until that copy exists. So when this is on, a material whose ONLY use of the
+screen copy is through program stages stops requesting it -- see
+GLESD3_MaterialCopyIsProgramOnly. Skipping the draws while still taking the copy
+would leave most of the cost on the table.
+====================
+*/
+static idCVar r_glesD3SkipMaterialPrograms( "r_glesD3SkipMaterialPrograms", "0", CVAR_RENDERER | CVAR_BOOL | CVAR_ARCHIVE,
+		"gles_d3: skip material-program stages (heat haze, bumpy environment, monochrome) and the screen copy they would force" );
+
+
 static void GLESD3_StepError( const char *step, const idMaterial *material ) {
 	if ( r_glesD3Report.GetInteger() < 2 || gles_stepErrorReported ) {
 		return;
@@ -249,6 +277,55 @@ static bool GLESD3_StageUsesCurrentRender( const shaderStage_t *stage ) {
 		}
 	}
 	return false;
+}
+
+/*
+====================
+GLESD3_ProgramStageDisabled
+
+customLighting stages are excluded: the interaction pass owns those, so this
+pass declining them is already correct and already counted, and letting this
+cvar short-circuit them would only hide that from the counter.
+====================
+*/
+static bool GLESD3_ProgramStageDisabled( const shaderStage_t *stage ) {
+	return stage != NULL
+			&& stage->newStage != NULL
+			&& !stage->newStage->customLighting
+			&& r_glesD3SkipMaterialPrograms.GetBool();
+}
+
+/*
+====================
+GLESD3_MaterialCopyIsProgramOnly
+
+True when this material wants the screen copy solely to feed stages that
+r_glesD3SkipMaterialPrograms is about to skip -- so with the cvar on, the copy
+is pure cost and the material can be walked without one.
+
+Deliberately conservative: one ordinary stage sampling _currentRender is enough
+to answer false and keep the copy. Glass with both a plain stage and a haze
+stage answers true, because only the haze stage reads the copy; the plain stage
+still draws, and it never needed it.
+====================
+*/
+static bool GLESD3_MaterialCopyIsProgramOnly( const idMaterial *shader ) {
+	if ( shader == NULL || !r_glesD3SkipMaterialPrograms.GetBool() ) {
+		return false;
+	}
+	bool anyCopyUser = false;
+	const int stageCount = shader->GetNumStages();
+	for ( int i = 0; i < stageCount; i++ ) {
+		const shaderStage_t *pStage = shader->GetStage( i );
+		if ( !GLESD3_StageUsesCurrentRender( pStage ) ) {
+			continue;
+		}
+		if ( !GLESD3_ProgramStageDisabled( pStage ) ) {
+			return false;
+		}
+		anyCopyUser = true;
+	}
+	return anyCopyUser;
 }
 
 /*
@@ -1286,6 +1363,13 @@ static void RB_GLESD3_T_RenderShaderPasses( const drawSurf_t *surf ) {
 		// Before the newStage skip, exactly as the legacy loop orders it
 		// (draw_common.cpp:6989): a stage this backend cannot draw may still be
 		// the reason a LATER stage has something to sample.
+		// Ahead of the capture below, unlike every other skip in this loop. A
+		// stage that is not going to draw must not be the reason a fullscreen
+		// screen copy is taken -- that copy is most of what these stages cost.
+		if ( GLESD3_ProgramStageDisabled( pStage ) ) {
+			continue;
+		}
+
 		if ( !backEnd.currentRenderCopied && GLESD3_StageUsesCurrentRender( pStage ) ) {
 			R_GLESD3_CaptureCurrentRender();
 		}
@@ -1544,7 +1628,8 @@ int RB_GLESD3_DrawShaderPasses( drawSurf_t **drawSurfs, int numDrawSurfs,
 		// (draw_common.cpp:7543).
 		if ( drawSurfs[i]->material->TestMaterialFlag( MF_NEED_CURRENT_RENDER )
 				&& drawSurfs[i]->material->GetSort() < SS_POST_PROCESS
-				&& !backEnd.currentRenderCopied ) {
+				&& !backEnd.currentRenderCopied
+				&& !GLESD3_MaterialCopyIsProgramOnly( drawSurfs[i]->material ) ) {
 			R_GLESD3_CaptureCurrentRender();
 		}
 
@@ -1558,8 +1643,15 @@ int RB_GLESD3_DrawShaderPasses( drawSurf_t **drawSurfs, int numDrawSurfs,
 		// game/airdefense1 it is seven warp_mask surfaces. They were drawn as
 		// opaque black quads until R_FindARBProgram stopped returning 0 --
 		// which had also been suppressing their SS_POST_PROCESS sort.
+		// With r_glesD3SkipMaterialPrograms on, a material whose only reader of
+		// the screen copy is a program stage no longer needs one, so it must not
+		// stop the walk either. This is where the saving actually comes from:
+		// breaking here is what makes the view driver take a fullscreen copy and
+		// re-enter. The material still draws whatever ordinary stages it has --
+		// glass keeps its plain stage and loses only the haze.
 		if ( drawSurfs[i]->material->GetSort() >= SS_POST_PROCESS
-				&& !backEnd.currentRenderCopied ) {
+				&& !backEnd.currentRenderCopied
+				&& !GLESD3_MaterialCopyIsProgramOnly( drawSurfs[i]->material ) ) {
 			if ( recordPostProcessSkips ) {
 				for ( int remaining = i; remaining < numDrawSurfs; remaining++ ) {
 					if ( drawSurfs[remaining]->material != NULL ) {
