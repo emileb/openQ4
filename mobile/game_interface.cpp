@@ -127,7 +127,8 @@ enum
 };
 
 #define EVENT_QUEUE_SIZE 128
-#define COMMAND_RING_SIZE 8
+// Sized for the in-game options dialog, which sends its whole cvar block in one burst.
+#define COMMAND_RING_SIZE 32
 #define COMMAND_MAX_LEN 128
 
 struct TouchEvent
