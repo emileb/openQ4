@@ -176,9 +176,14 @@ def validate_game_module_symbol_discipline() -> None:
     engine_exports = read("tools/build/darwin_game_module.exp")
 
     require(engine_exports, "_GetGameAPI", "darwin game module export list")
+    # openQ4_Mem_GetModuleStats is the one deliberate addition on this branch:
+    # nothing inside either binary references it, so it cannot be interposed.
+    # The engine looks it up by name on a specific module handle to fold that
+    # module's idlib memory counters into the total.
+    allowed_exports = ("_GetGameAPI", "_openQ4_Mem_GetModuleStats")
     for line in engine_exports.splitlines():
         stripped = line.strip()
-        if stripped and not stripped.startswith("#") and stripped != "_GetGameAPI":
+        if stripped and not stripped.startswith("#") and stripped not in allowed_exports:
             raise AssertionError(f"darwin game module export list exports {stripped!r} beyond the entry point")
 
     for token in (

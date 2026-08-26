@@ -24,8 +24,10 @@ def test_cvar_and_menu_expose_safe_supersampling_range():
 def test_legacy_crop_does_not_run_above_native():
     render_system = read_repo_file(Path("src") / "renderer" / "RenderSystem.cpp")
 
+    # Upstream guards this branch with the temporal-presentation checks too, so
+    # match the two conditions that carry the meaning rather than the whole line.
     assert_true(
-        "if ( screenFraction < 100 && r_resolutionScaleMode.GetInteger() == 0 )" in render_system,
+        "&& screenFraction < 100 && r_resolutionScaleMode.GetInteger() == 0 ) {" in render_system,
         "legacy crop mode should only run below native resolution",
     )
     assert_true("Supersampling above native" in render_system, "BeginFrame should document that supersampling is handled offscreen")
