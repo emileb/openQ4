@@ -7,20 +7,24 @@
 
 	The module keeps tr_backend.cpp -- the real frame driver, with
 	RB_ExecuteBackEndCommands, RB_SetBuffer, RB_SwapBuffers and the ModernGL
-	executor hooks -- rather than replacing it. Measured with nm against the
-	desktop build, tr_backend.cpp references exactly five symbols defined in
-	the translation units this module drops (draw_common.cpp, tr_render.cpp,
-	tr_rendertools.cpp, draw_arb2.cpp). Supplying those five here reuses the
-	entire frame loop, where the Vulkan module had to write a 1344-line
-	backend of its own.
+	executor hooks -- rather than replacing it. The TUs this module drops
+	(draw_common.cpp, tr_render.cpp, tr_rendertools.cpp, draw_arb2.cpp) are the
+	fixed-function and ARB-assembly paths, and the symbols the kept front end
+	still references from them are supplied here. That reuses the entire frame
+	loop, where the Vulkan module had to write a 1344-line backend of its own.
 
-	All five are legacy work by definition:
+	Every one of them is legacy work by definition. The scene draw and the
+	back-buffer post chain:
 
 	  RB_DrawView                        the ARB2/fixed-function scene draw
 	  RB_DrawSpecialEffects              legacy BSE effects
 	  RB_ApplyResolutionScaleToBackBuffer
 	  RB_ApplyCRTToBackBuffer            legacy back-buffer post
 	  RB_ApplyColorMappingsToBackBuffer
+
+	plus the ARB2 shadow-cache parity surface and the shared-ownership view
+	owners further down, which report "not taken" so the caller keeps its
+	classic path.
 
 	Under BE_MODERN the modern executor owns the passes it can and composites
 	in R_ModernGLExecutor_ComposeVisibleFrame; nothing here needs to draw for
@@ -33,6 +37,8 @@
 
 #include "../../idlib/precompiled.h"
 #pragma hdrstop
+
+#include <cstdint>
 
 #include "../tr_local.h"
 #include "../ShadowMapArb2Parity.h"
@@ -527,11 +533,65 @@ bool RB_ShadowMapEstimateArb2CacheOwnership( const viewLight_t *vLight, const vi
 	return false;
 }
 
-bool RB_ShadowMapProjectedAtlasSlotForLight( int lightDefIndex, shadowMapArb2AtlasSlot_t &slot ) {
-	( void )lightDefIndex; ( void )slot;
+bool RB_ShadowMapProjectedAtlasSlotForLight( const viewLight_t *vLight,
+		const viewDef_t *viewDef, shadowMapArb2AtlasSlot_t &slot ) {
+	( void )vLight; ( void )viewDef; ( void )slot;
 	return false;
 }
 
-void RB_ShadowMapProjectedAtlasSlotMarkUsed( int lightDefIndex ) { ( void )lightDefIndex; }
+bool RB_ShadowMapProjectedAtlasSlotMarkUsed( int lightDefIndex, int signature,
+		std::uint64_t storageGeneration, int cellX, int cellY, int cellSpan ) {
+	( void )lightDefIndex; ( void )signature; ( void )storageGeneration;
+	( void )cellX; ( void )cellY; ( void )cellSpan;
+	return false;
+}
+
+bool RB_ShadowMapPointCubeForLight( const viewLight_t *vLight,
+		const viewDef_t *viewDef, shadowMapArb2PointCube_t &cube ) {
+	( void )vLight; ( void )viewDef; ( void )cube;
+	return false;
+}
+
+void RB_ShadowMapPointCubeMarkUsed( int lightDefIndex ) { ( void )lightDefIndex; }
+
+// The ARB2 shadow cache does not exist on this module, so there is never a
+// stale one to drop. Returning false leaves the caller's bindings marked
+// current, which is consistent with RB_ShadowMapTextureBindings above
+// reporting that this backend publishes none.
+bool RB_ShadowMapPrepareCacheView( const viewDef_t *viewDef ) {
+	( void )viewDef;
+	return false;
+}
+
+// The shared-ownership views below all follow the same contract in
+// RB_ExecuteBackEndCommands: false means "this backend did not take the view",
+// and the caller runs the untouched classic RB_DrawView instead. That is the
+// only correct answer here -- the shared owners live in draw_common.cpp, which
+// this module drops along with the rest of the fixed-function draw paths.
+bool RB_DrawSharedGuiView( const viewDef_t *viewDef ) {
+	( void )viewDef;
+	return false;
+}
+
+bool RB_DrawSharedCinematicRootView( const viewDef_t *viewDef ) {
+	( void )viewDef;
+	return false;
+}
+
+// Temporal presentation resolves in draw_common.cpp against the ARB2 post
+// chain. With no resolve running, the depth stamps it would consume are dead
+// bookkeeping, so the invalidate/stamp pair is a no-op rather than a table
+// this module would have to keep coherent for nobody.
+bool RB_ResolveTemporalPresentation( const resolveTemporalPresentationCommand_t &command ) {
+	( void )command;
+	return false;
+}
+
+void RB_InvalidateTemporalDepthStamp( idRenderTexture *target ) { ( void )target; }
+
+void RB_StampTemporalDepthResolved( idRenderTexture *target, int frameNumber,
+		unsigned int historyGeneration ) {
+	( void )target; ( void )frameNumber; ( void )historyGeneration;
+}
 
 #endif /* OPENQ4_RENDERER_GLES_MODULE */

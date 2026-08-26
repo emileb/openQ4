@@ -142,9 +142,9 @@ RENDERER_VK_EXCLUDED_SOURCES = (
 #   - the ModernGL translation units are KEPT, not replaced. GLES is still GL,
 #     so ModernGLExecutor, the shader library, the state cache, the upload
 #     manager and the render-graph resources are reused as-is.
-#   - tr_backend.cpp is KEPT. Measured with nm, it references only five symbols
-#     from the dropped TUs, supplied by renderer/GLES/gles_Backend.cpp, so the
-#     module reuses the real frame loop instead of writing its own.
+#   - tr_backend.cpp is KEPT. The symbols it still references from the dropped
+#     TUs are supplied by renderer/GLES/gles_Backend.cpp, so the module reuses
+#     the real frame loop instead of writing its own.
 #   - renderer/GLES_D3/* is the second backend in this module: a Doom
 #     3-shaped ES 3.0 path (BE_GLES_D3, `r_renderer glesd3`) that renders the
 #     view itself instead of deferring to the ModernGL executor. Opt-in, so

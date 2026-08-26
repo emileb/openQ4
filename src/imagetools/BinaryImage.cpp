@@ -216,7 +216,7 @@ void idBinaryImage::Load2DFromMemory( int width, int height, const byte * pic_co
 		// Images that are going to be block compressed and aren't multiples of 4
 		// need to be padded out before compressing. ETC2 and EAC use the same
 		// 4x4 blocks as DXT, so they take the same padding.
-		byte * dxtPic = uploadPic;
+		const byte * dxtPic = uploadPic;
 		int	dxtWidth = 0;
 		int	dxtHeight = 0;
 		if ( textureFormat == FMT_DXT5 || textureFormat == FMT_DXT1 ||

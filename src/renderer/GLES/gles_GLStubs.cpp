@@ -71,6 +71,7 @@ PFN_glTexImage2DMultisample			glTexImage2DMultisample = NULL;
 PFN_glGetBufferSubData				glGetBufferSubData = NULL;
 PFN_glGetQueryObjectiv				glGetQueryObjectiv = NULL;
 PFN_glGetQueryObjectui64v			glGetQueryObjectui64v = NULL;
+PFN_glQueryCounter					glQueryCounter = NULL;
 PFN_glDebugMessageCallback			glDebugMessageCallback = NULL;
 PFN_glDebugMessageControl			glDebugMessageControl = NULL;
 PFN_glObjectLabel					glObjectLabel = NULL;
@@ -108,6 +109,7 @@ void GLES_ResolveOptionalEntryPoints( void ) {
 	// EXT_disjoint_timer_query
 	GLES_RESOLVE( PFN_glGetQueryObjectiv, glGetQueryObjectiv, "glGetQueryObjectivEXT" )
 	GLES_RESOLVE( PFN_glGetQueryObjectui64v, glGetQueryObjectui64v, "glGetQueryObjectui64vEXT" )
+	GLES_RESOLVE( PFN_glQueryCounter, glQueryCounter, "glQueryCounterEXT" )
 
 	// KHR_debug
 	GLES_RESOLVE( PFN_glDebugMessageCallback, glDebugMessageCallback, "glDebugMessageCallbackKHR" )

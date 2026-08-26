@@ -174,6 +174,7 @@ typedef void ( GL_APIENTRY *GLDEBUGPROC )( GLenum source, GLenum type, GLuint id
 #define GL_FRAMEBUFFER_BARRIER_BIT			0x00000400
 #define GL_SHADER_STORAGE_BARRIER_BIT		0x00002000
 #define GL_TEXTURE_FETCH_BARRIER_BIT		0x00000008
+#define GL_VERTEX_ATTRIB_ARRAY_BARRIER_BIT	0x00000001
 
 // KHR_debug: gl2ext.h carries these with a _KHR suffix.
 #define GL_DEBUG_OUTPUT						GL_DEBUG_OUTPUT_KHR
@@ -208,6 +209,7 @@ typedef void ( GL_APIENTRY *GLDEBUGPROC )( GLenum source, GLenum type, GLuint id
 #define GL_MAP_COHERENT_BIT					0x0080
 #define GL_DYNAMIC_STORAGE_BIT				0x0100
 #define GL_TIME_ELAPSED						0x88BF
+#define GL_TIMESTAMP						0x8E28
 
 // --- 3. Desktop-only tokens: cold code only ---
 // Fixed-function state reached by RB_SetDefaultGLState and the ARB2 probe.
@@ -456,6 +458,7 @@ typedef void ( GL_APIENTRY *PFN_glGetBufferSubData )( GLenum target, GLintptr of
 // Timer queries: EXT_disjoint_timer_query in ES
 typedef void ( GL_APIENTRY *PFN_glGetQueryObjectiv )( GLuint id, GLenum pname, GLint *params );
 typedef void ( GL_APIENTRY *PFN_glGetQueryObjectui64v )( GLuint id, GLenum pname, GLuint64 *params );
+typedef void ( GL_APIENTRY *PFN_glQueryCounter )( GLuint id, GLenum target );
 
 // KHR_debug
 typedef void ( GL_APIENTRY *PFN_glDebugMessageCallback )( GLDEBUGPROC callback, const void *userParam );
@@ -497,6 +500,7 @@ extern PFN_glTexImage2DMultisample			glTexImage2DMultisample;
 extern PFN_glGetBufferSubData				glGetBufferSubData;
 extern PFN_glGetQueryObjectiv				glGetQueryObjectiv;
 extern PFN_glGetQueryObjectui64v			glGetQueryObjectui64v;
+extern PFN_glQueryCounter					glQueryCounter;
 extern PFN_glDebugMessageCallback			glDebugMessageCallback;
 extern PFN_glDebugMessageControl			glDebugMessageControl;
 extern PFN_glObjectLabel					glObjectLabel;
