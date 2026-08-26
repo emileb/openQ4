@@ -564,9 +564,9 @@ that a later stage can blend through GL_DST_ALPHA.
 
 That is harmless as long as nothing downstream believes the alpha. On the
 desktop GL path nothing does: the NSOpenGL surface is opaque and the channel
-is ignored. On the ES path ANGLE presents through a CAMetalLayer, the macOS
-compositor honours the surface alpha, and every pixel one of those stages
-touched becomes transparent -- which reads as black.
+is ignored. On the ES path ANGLE presents through a Metal-backed layer, the
+macOS compositor honours the surface alpha, and every pixel one of those
+stages touched becomes transparent -- which reads as black.
 
 The failure is invisible in a screenshot, because R_ReadTiledPixels reads
 RGBA and packs down to RGB, discarding exactly the channel that is wrong. A
