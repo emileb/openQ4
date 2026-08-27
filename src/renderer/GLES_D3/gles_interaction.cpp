@@ -42,6 +42,10 @@ static const int GLESD3_TMU_DIFFUSE = 4;
 static const int GLESD3_TMU_SPECULAR = 5;
 
 static glesProgram_t *	gles_interactionProgram = NULL;
+// the GLESD3_AMBIENT variant: constant-direction light, no specular chain.
+// Selected per interaction by din->ambientLight rather than by uniform, so
+// the common per-light fragment path carries no branch (gles_program.h, D8).
+static glesProgram_t *	gles_interactionAmbientProgram = NULL;
 static float			gles_ambientDir[ 3 ] = { 1.0f, 0.0f, 0.0f };
 static int				gles_interactionDraws = 0;
 static bool				gles_reportedLights = false;
@@ -184,7 +188,8 @@ One primitive interaction: bump x diffuse x specular for one light.
 static void GLESD3_DrawInteraction( const drawInteraction_t *din ) {
 	const drawSurf_t *surf = din->surf;
 	const srfTriangles_t *tri = surf->geo;
-	glesProgram_t *program = gles_interactionProgram;
+	glesProgram_t *program = din->ambientLight
+			? gles_interactionAmbientProgram : gles_interactionProgram;
 
 	// tri->indexCache may legitimately be NULL here: R_CreateAmbientCache
 	// (tr_light.cpp:242) allocates VERTICES ONLY, so a light's generated
@@ -222,7 +227,7 @@ static void GLESD3_DrawInteraction( const drawInteraction_t *din ) {
 	glUniform4fv( program->uDiffuseColor, 1, din->diffuseColor.ToFloatPtr() );
 	glUniform4fv( program->uSpecularColor, 1, din->specularColor.ToFloatPtr() );
 
-	glUniform1f( program->uAmbientLight, din->ambientLight ? 1.0f : 0.0f );
+	// only the ambient variant declares uAmbientDir; -1 no-ops on the base
 	glUniform3fv( program->uAmbientDir, 1, gles_ambientDir );
 
 	// the (rgbModulate, rgbAdd, alphaModulate, alphaAdd) SVC packing, shared
@@ -510,6 +515,8 @@ void RB_GLESD3_DrawInteractions( void ) {
 	}
 
 	gles_interactionProgram = R_GLESD3_Program( GLESD3_PROGRAM_INTERACTION );
+	gles_interactionAmbientProgram = R_GLESD3_Program( GLESD3_PROGRAM_INTERACTION,
+			GLESD3_VARIANT_AMBIENT );
 	if ( gles_interactionProgram == NULL ) {
 		return;
 	}

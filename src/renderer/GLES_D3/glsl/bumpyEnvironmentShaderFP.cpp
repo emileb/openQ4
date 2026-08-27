@@ -22,7 +22,9 @@ precision highp samplerCube;
 
 uniform samplerCube uCubeMap;
 uniform sampler2D uTexture1;	// the material's bump stage
+#ifdef GLESD3_ALPHATEST
 uniform float uAlphaTest;
+#endif
 
 in vec2 vNormalTexCoord;
 in vec3 vGlobalToEye;
@@ -59,9 +61,11 @@ void main() {
 
     vec4 color = vec4(texture(uCubeMap, reflectionVector).rgb, 1.0);
 
+#ifdef GLESD3_ALPHATEST
     if (uAlphaTest >= 0.0 && color.a <= uAlphaTest) {
         discard;
     }
+#endif
     fragColor = color;
 }
 )";

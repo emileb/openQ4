@@ -35,8 +35,57 @@ rather than to a backend with no programs.
 static idCVar r_glesD3ShaderPath( "r_glesD3ShaderPath", "", CVAR_RENDERER,
 		"gles_d3: directory to load <program>.vert/.frag from; empty uses the embedded sources" );
 
-static glesProgram_t	gles_programs[ GLESD3_PROGRAM_COUNT ];
+// [id][slot]: slot 0 is the BASE variant, slot 1 the program's alternate
+// (see glesD3ProgramVariant_t). Programs with no alternate leave slot 1 empty.
+static glesProgram_t	gles_programs[ GLESD3_PROGRAM_COUNT ][ 2 ];
 static GLuint			gles_currentProgram = 0;
+
+/*
+====================
+GLESD3_AltVariant
+
+Which alternate variant a program declares, or GLESD3_VARIANT_BASE for none.
+One switch in the style of R_GLESD3_ProgramName so a new program has exactly
+one place to declare its specialisation.
+====================
+*/
+static glesD3ProgramVariant_t GLESD3_AltVariant( glesD3ProgramId_t id ) {
+	switch ( id ) {
+		// every program whose fragment stage can alpha-test. DEBUG is left
+		// single-variant deliberately: it is a diagnostic path, and keeping the
+		// runtime uniform test there costs nothing that matters.
+		case GLESD3_PROGRAM_MATERIAL:
+		case GLESD3_PROGRAM_CUBEMAP:
+		case GLESD3_PROGRAM_ENVIRONMENT:
+		case GLESD3_PROGRAM_BUMPY_ENVIRONMENT:
+		case GLESD3_PROGRAM_HEATHAZE:
+		case GLESD3_PROGRAM_HEATHAZE_MASK:
+		case GLESD3_PROGRAM_MONOCHROME:
+			return GLESD3_VARIANT_ALPHATEST;
+		case GLESD3_PROGRAM_INTERACTION:
+			return GLESD3_VARIANT_AMBIENT;
+		default:
+			return GLESD3_VARIANT_BASE;
+	}
+}
+
+/*
+====================
+GLESD3_VariantDefine
+
+The macro a variant defines, and the suffix its program name carries in logs.
+====================
+*/
+static const char *GLESD3_VariantDefine( glesD3ProgramVariant_t variant ) {
+	switch ( variant ) {
+		case GLESD3_VARIANT_ALPHATEST:
+			return "GLESD3_ALPHATEST";
+		case GLESD3_VARIANT_AMBIENT:
+			return "GLESD3_AMBIENT";
+		default:
+			return NULL;
+	}
+}
 
 /*
 ====================
@@ -98,10 +147,43 @@ static char *GLESD3_LoadOverrideSource( const char *programName, GLenum stage ) 
 
 /*
 ====================
+GLESD3_SpliceVariantDefine
+
+Returns a Mem_Alloc'd copy of `body` with `#define <define> 1` inserted
+directly after the `#version` line -- the only place GLSL ES allows a define
+to follow. Applied identically to the embedded source and a disk override,
+so both compile the same variant. NULL when the source has no newline to
+splice at, which no complete program can lack.
+====================
+*/
+static char *GLESD3_SpliceVariantDefine( const char *body, const char *define ) {
+	const char *newline = strchr( body, '\n' );
+	if ( newline == NULL ) {
+		return NULL;
+	}
+	const int headLength = (int)( newline - body ) + 1;
+	const int bodyLength = (int)strlen( body );
+
+	idStr defineLine = va( "#define %s 1\n", define );
+
+	char *spliced = (char *)Mem_Alloc( bodyLength + defineLine.Length() + 1 );
+	if ( spliced == NULL ) {
+		return NULL;
+	}
+	memcpy( spliced, body, headLength );
+	memcpy( spliced + headLength, defineLine.c_str(), defineLine.Length() );
+	memcpy( spliced + headLength + defineLine.Length(), body + headLength,
+			bodyLength - headLength + 1 );	// includes the terminator
+	return spliced;
+}
+
+/*
+====================
 GLESD3_CompileStage
 ====================
 */
-static GLuint GLESD3_CompileStage( glesD3ProgramId_t id, GLenum stage, const char *programName ) {
+static GLuint GLESD3_CompileStage( glesD3ProgramId_t id, GLenum stage, const char *programName,
+		const char *variantDefine ) {
 	const char *embedded = R_GLESD3_EmbeddedShaderSource( id, stage );
 	if ( embedded == NULL ) {
 		return 0;
@@ -110,26 +192,48 @@ static GLuint GLESD3_CompileStage( glesD3ProgramId_t id, GLenum stage, const cha
 	char *override = GLESD3_LoadOverrideSource( programName, stage );
 	const char *body = ( override != NULL ) ? override : embedded;
 
+	// A variant is the same source with its macro spliced in after `#version`;
+	// the BASE variant compiles the source untouched. That keeps a shader file
+	// pasteable into a validator unchanged (it compiles as BASE), and makes a
+	// disk override byte-identical to the embedded source.
+	char *spliced = NULL;
+	if ( variantDefine != NULL ) {
+		spliced = GLESD3_SpliceVariantDefine( body, variantDefine );
+		if ( spliced == NULL ) {
+			if ( override != NULL ) {
+				fileSystem->FreeFile( override );
+			}
+			return 0;
+		}
+		body = spliced;
+	}
+
 	const GLuint shader = glCreateShader( stage );
 	if ( shader == 0 ) {
+		if ( spliced != NULL ) {
+			Mem_Free( spliced );
+		}
 		if ( override != NULL ) {
 			fileSystem->FreeFile( override );
 		}
 		return 0;
 	}
 
-	// Each source under GLES_D3/glsl/ is a complete program -- `#version 300
-	// es` and the precision defaults included -- so nothing is prepended here.
-	// That keeps a shader file pasteable into a validator unchanged, and makes
-	// a disk override byte-identical to the embedded source.
 	glShaderSource( shader, 1, &body, NULL );
 	glCompileShader( shader );
+
+	if ( spliced != NULL ) {
+		Mem_Free( spliced );
+	}
 
 	GLint compiled = GL_FALSE;
 	glGetShaderiv( shader, GL_COMPILE_STATUS, &compiled );
 	if ( compiled != GL_TRUE ) {
-		common->Warning( "gles_d3: %s %s shader failed to compile",
-				programName, stage == GL_VERTEX_SHADER ? "vertex" : "fragment" );
+		common->Warning( "gles_d3: %s%s%s %s shader failed to compile",
+				programName,
+				variantDefine != NULL ? " +" : "",
+				variantDefine != NULL ? variantDefine : "",
+				stage == GL_VERTEX_SHADER ? "vertex" : "fragment" );
 		GLESD3_PrintInfoLog( shader, false, "shader log" );
 		glDeleteShader( shader );
 		if ( override != NULL ) {
@@ -181,7 +285,6 @@ static void GLESD3_ResolveUniforms( glesProgram_t *program ) {
 	program->uSpecularMatrixT = glGetUniformLocation( program->program, "uSpecularMatrixT" );
 	program->uDiffuseColor = glGetUniformLocation( program->program, "uDiffuseColor" );
 	program->uSpecularColor = glGetUniformLocation( program->program, "uSpecularColor" );
-	program->uAmbientLight = glGetUniformLocation( program->program, "uAmbientLight" );
 	program->uAmbientDir = glGetUniformLocation( program->program, "uAmbientDir" );
 	program->uLightOrigin = glGetUniformLocation( program->program, "uLightOrigin" );
 
@@ -232,12 +335,20 @@ static void GLESD3_ResolveUniforms( glesProgram_t *program ) {
 GLESD3_BuildProgram
 ====================
 */
-static bool GLESD3_BuildProgram( glesD3ProgramId_t id ) {
-	glesProgram_t *program = &gles_programs[ id ];
+static bool GLESD3_BuildProgram( glesD3ProgramId_t id, glesD3ProgramVariant_t variant ) {
+	const int slot = ( variant == GLESD3_VARIANT_BASE ) ? 0 : 1;
+	const char *variantDefine = GLESD3_VariantDefine( variant );
+	glesProgram_t *program = &gles_programs[ id ][ slot ];
 	const char *programName = R_GLESD3_ProgramName( id );
 
 	memset( program, 0, sizeof( *program ) );
-	idStr::Copynz( program->name, programName, sizeof( program->name ) );
+	if ( variantDefine != NULL ) {
+		// the log/debug name carries the variant; the override filename does not
+		idStr::Copynz( program->name, va( "%s+%s", programName, variantDefine ),
+				sizeof( program->name ) );
+	} else {
+		idStr::Copynz( program->name, programName, sizeof( program->name ) );
+	}
 	program->uMVP = program->uColor = program->uTextureMatrix = -1;
 	program->uAlphaTest = program->uTexture0 = program->uTexture1 = -1;
 	program->uTexMatrixS = program->uTexMatrixT = program->uVertexColor = -1;
@@ -247,13 +358,13 @@ static bool GLESD3_BuildProgram( glesD3ProgramId_t id ) {
 	program->uDiffuseMatrixS = program->uDiffuseMatrixT = -1;
 	program->uSpecularMatrixS = program->uSpecularMatrixT = -1;
 	program->uDiffuseColor = program->uSpecularColor = -1;
-	program->uAmbientLight = program->uAmbientDir = program->uLightOrigin = -1;
+	program->uAmbientDir = program->uLightOrigin = -1;
 	program->uFogDistanceS = program->uFogEnterS = program->uFogEnterT = -1;
 	program->uCubeMap = -1;
 	program->uModelRow0 = program->uModelRow1 = program->uModelRow2 = -1;
 
-	const GLuint vertexShader = GLESD3_CompileStage( id, GL_VERTEX_SHADER, programName );
-	const GLuint fragmentShader = GLESD3_CompileStage( id, GL_FRAGMENT_SHADER, programName );
+	const GLuint vertexShader = GLESD3_CompileStage( id, GL_VERTEX_SHADER, programName, variantDefine );
+	const GLuint fragmentShader = GLESD3_CompileStage( id, GL_FRAGMENT_SHADER, programName, variantDefine );
 	if ( vertexShader == 0 || fragmentShader == 0 ) {
 		if ( vertexShader != 0 ) {
 			glDeleteShader( vertexShader );
@@ -293,7 +404,7 @@ static bool GLESD3_BuildProgram( glesD3ProgramId_t id ) {
 	GLint linked = GL_FALSE;
 	glGetProgramiv( handle, GL_LINK_STATUS, &linked );
 	if ( linked != GL_TRUE ) {
-		common->Warning( "gles_d3: program '%s' failed to link", programName );
+		common->Warning( "gles_d3: program '%s' failed to link", program->name );
 		GLESD3_PrintInfoLog( handle, true, "program log" );
 		glDeleteProgram( handle );
 		return false;
@@ -314,16 +425,28 @@ bool R_GLESD3_Programs_Init( void ) {
 
 	int built = 0;
 	int failed = 0;
+	int total = 0;
 	for ( int i = 0; i < GLESD3_PROGRAM_COUNT; i++ ) {
-		if ( GLESD3_BuildProgram( (glesD3ProgramId_t)i ) ) {
+		const glesD3ProgramId_t id = (glesD3ProgramId_t)i;
+		total++;
+		if ( GLESD3_BuildProgram( id, GLESD3_VARIANT_BASE ) ) {
 			built++;
 		} else {
 			failed++;
 		}
+		const glesD3ProgramVariant_t alt = GLESD3_AltVariant( id );
+		if ( alt != GLESD3_VARIANT_BASE ) {
+			total++;
+			if ( GLESD3_BuildProgram( id, alt ) ) {
+				built++;
+			} else {
+				failed++;
+			}
+		}
 	}
 
 	common->Printf( "gles_d3 shader library: programs=%i/%i failed=%i\n",
-			built, (int)GLESD3_PROGRAM_COUNT, failed );
+			built, total, failed );
 	return failed == 0;
 }
 
@@ -334,10 +457,12 @@ R_GLESD3_Programs_Shutdown
 */
 void R_GLESD3_Programs_Shutdown( void ) {
 	for ( int i = 0; i < GLESD3_PROGRAM_COUNT; i++ ) {
-		if ( gles_programs[ i ].program != 0 ) {
-			glDeleteProgram( gles_programs[ i ].program );
+		for ( int slot = 0; slot < 2; slot++ ) {
+			if ( gles_programs[ i ][ slot ].program != 0 ) {
+				glDeleteProgram( gles_programs[ i ][ slot ].program );
+			}
+			memset( &gles_programs[ i ][ slot ], 0, sizeof( gles_programs[ i ][ slot ] ) );
 		}
-		memset( &gles_programs[ i ], 0, sizeof( gles_programs[ i ] ) );
 	}
 	if ( gles_currentProgram != 0 ) {
 		glUseProgram( 0 );
@@ -350,14 +475,23 @@ void R_GLESD3_Programs_Shutdown( void ) {
 R_GLESD3_Program
 ====================
 */
-glesProgram_t *R_GLESD3_Program( glesD3ProgramId_t id ) {
+glesProgram_t *R_GLESD3_Program( glesD3ProgramId_t id, glesD3ProgramVariant_t variant ) {
 	if ( id < 0 || id >= GLESD3_PROGRAM_COUNT ) {
 		return NULL;
 	}
-	if ( gles_programs[ id ].program == 0 ) {
+	int slot = 0;
+	if ( variant != GLESD3_VARIANT_BASE ) {
+		// fail closed on a variant the program does not declare, exactly as on
+		// one that failed to link: NULL, never a wrong program
+		if ( GLESD3_AltVariant( id ) != variant ) {
+			return NULL;
+		}
+		slot = 1;
+	}
+	if ( gles_programs[ id ][ slot ].program == 0 ) {
 		return NULL;
 	}
-	return &gles_programs[ id ];
+	return &gles_programs[ id ][ slot ];
 }
 
 /*

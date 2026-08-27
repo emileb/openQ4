@@ -17,8 +17,10 @@
 // ordinary lights flagged ambientLight, and every path substitutes a constant
 // tangent-space direction for the per-pixel light vector: ARB2 by binding
 // ambientNormalMap instead of the normalization cube map
-// (draw_arb2.cpp:11460), this shader by uAmbientLight / uAmbientDir. The
-// cube's 8-bit quantization is applied CPU-side so the two agree exactly.
+// (draw_arb2.cpp:11460), this shader by its GLESD3_AMBIENT variant, which
+// substitutes uAmbientDir at compile time. The cube's 8-bit quantization is
+// applied CPU-side so the two agree exactly. Compiled standalone (no define)
+// this file is the ordinary per-light case.
 //
 // Sampler units are 1:1 with the Vulkan descriptor sets:
 //   0 specularTable   1 bump      2 lightFalloff
@@ -40,8 +42,9 @@ uniform sampler2D uSpecularMap;
 uniform vec4 uDiffuseColor;
 uniform vec4 uSpecularColor;
 
-uniform float uAmbientLight;
+#ifdef GLESD3_AMBIENT
 uniform vec3 uAmbientDir;
+#endif
 
 in vec2 vBumpTexCoord;
 in vec2 vDiffuseTexCoord;
@@ -82,9 +85,15 @@ void main() {
     float rebuiltZ = sqrt(max(1.0 - dot(localNormalXY, localNormalXY), 0.0));
     vec3 localNormal = vec3(localNormalXY, storedZ < 0.0 ? rebuiltZ : storedZ);
 
-    // an ambient light lights from a constant direction instead of from the
-    // light origin, which is what keeps unlit corners off pure black
-    vec3 lightDir = (uAmbientLight > 0.5) ? uAmbientDir : SafeNormalize(vLightVector);
+    // An ambient light lights from a constant direction instead of from the
+    // light origin, which is what keeps unlit corners off pure black. The two
+    // cases are separate compiled variants (gles_program.cpp, D8) rather than
+    // a uniform test, so the common per-light case carries no branch at all.
+#ifdef GLESD3_AMBIENT
+    vec3 lightDir = uAmbientDir;
+#else
+    vec3 lightDir = SafeNormalize(vLightVector);
+#endif
     float ndotl = max(dot(lightDir, localNormal), 0.0);
 
     vec3 light = vec3(ndotl);
@@ -93,10 +102,17 @@ void main() {
 
     vec3 diffuse = texture(uDiffuseMap, vDiffuseTexCoord).rgb * uDiffuseColor.rgb;
 
+#ifdef GLESD3_AMBIENT
+    // an ambient light has no specular term: GLESD3_SubmitInteraction binds
+    // blackImage as the specular map, so the retail contribution is exactly
+    // zero -- compiled out here rather than sampled and multiplied away
+    vec3 specular = vec3(0.0);
+#else
     vec3 halfAngle = SafeNormalize(vHalfAngleVector);
     float specularDot = clamp(dot(halfAngle, localNormal), 0.0, 1.0);
     float specularTerm = texture(uSpecularTableMap, vec2(specularDot, 0.5)).r * 2.0;
     vec3 specular = texture(uSpecularMap, vSpecularTexCoord).rgb * uSpecularColor.rgb * specularTerm;
+#endif
 
     outColor = vec4((diffuse + specular) * light * vVertexColor, 0.0);
 }

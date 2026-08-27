@@ -38,7 +38,9 @@ uniform sampler2D uTexture2;	// the mask
 // uParms[7].z  = 1 for the AndVertex variant, 0 otherwise
 uniform vec4 uParms[8];
 
+#ifdef GLESD3_ALPHATEST
 uniform float uAlphaTest;
+#endif
 
 in vec2 vMaskTexCoord;
 in vec2 vScrollTexCoord;
@@ -67,9 +69,11 @@ void main() {
 
     vec4 color = vec4(texture(uTexture0, screenTexCoord.xy).rgb, 1.0);
 
+#ifdef GLESD3_ALPHATEST
     if (uAlphaTest >= 0.0 && color.a <= uAlphaTest) {
         discard;
     }
+#endif
     fragColor = color;
 }
 )";

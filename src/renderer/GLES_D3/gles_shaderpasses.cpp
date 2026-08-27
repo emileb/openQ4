@@ -622,7 +622,8 @@ static void GLESD3_BindStageVertexColor( const drawSurf_t *surf, int stage, cons
 RB_GLESD3_T_FillDepthBuffer
 ====================
 */
-static void RB_GLESD3_T_FillDepthBuffer( const drawSurf_t *surf, glesProgram_t *program ) {
+static void RB_GLESD3_T_FillDepthBuffer( const drawSurf_t *surf, glesProgram_t *program,
+		glesProgram_t *alphaTestProgram ) {
 	const srfTriangles_t *tri = surf->geo;
 	const idMaterial *shader = surf->material;
 
@@ -699,18 +700,20 @@ static void RB_GLESD3_T_FillDepthBuffer( const drawSurf_t *surf, glesProgram_t *
 		return;
 	}
 
-	R_GLESD3_UseProgram( program );
-	glUniformMatrix4fv( program->uMVP, 1, GL_FALSE, mvp );
-	// vertex colour plays no part in the depth fill
-	const float ignoreVertexColor[ 4 ] = { 0.0f, 1.0f, 0.0f, 1.0f };
-	glUniform4fv( program->uVertexColor, 1, ignoreVertexColor );
-
 	bool drawSolid = ( shader->Coverage() == MC_OPAQUE );
 
-	if ( shader->Coverage() == MC_PERFORATED ) {
-		// perforated surfaces carry their cutout in one or more alpha-tested
-		// stages; each is drawn so the depth buffer gets the holes right
+	if ( shader->Coverage() == MC_PERFORATED && alphaTestProgram != NULL ) {
+		// Perforated surfaces carry their cutout in one or more alpha-tested
+		// stages; each is drawn so the depth buffer gets the holes right.
+		// Only these draws bind the ALPHATEST variant -- solid fills below use
+		// the discard-free base program, which is what lets a tiler keep its
+		// early-Z pipeline for the bulk of the prepass (gles_program.h, D8).
 		bool didDraw = false;
+		R_GLESD3_UseProgram( alphaTestProgram );
+		glUniformMatrix4fv( alphaTestProgram->uMVP, 1, GL_FALSE, mvp );
+		// vertex colour plays no part in the depth fill
+		const float perforatedVertexColor[ 4 ] = { 0.0f, 1.0f, 0.0f, 1.0f };
+		glUniform4fv( alphaTestProgram->uVertexColor, 1, perforatedVertexColor );
 		for ( stage = 0; stage < stageCount; stage++ ) {
 			const shaderStage_t *pStage = shader->GetStage( stage );
 			if ( !pStage->hasAlphaTest || regs[ pStage->conditionRegister ] == 0 ) {
@@ -735,29 +738,36 @@ static void RB_GLESD3_T_FillDepthBuffer( const drawSurf_t *surf, glesProgram_t *
 				pStage->texture.image->Bind();
 			}
 
-			glUniform4fv( program->uTexMatrixS, 1, matrixS.ToFloatPtr() );
-			glUniform4fv( program->uTexMatrixT, 1, matrixT.ToFloatPtr() );
-			glUniform4fv( program->uColor, 1, color );
+			glUniform4fv( alphaTestProgram->uTexMatrixS, 1, matrixS.ToFloatPtr() );
+			glUniform4fv( alphaTestProgram->uTexMatrixT, 1, matrixT.ToFloatPtr() );
+			glUniform4fv( alphaTestProgram->uColor, 1, color );
 			// the stage's own reference, not the GLS_ATEST buckets: a
 			// perforated stage carries an arbitrary alphaTestRegister
-			glUniform1f( program->uAlphaTest, regs[ pStage->alphaTestRegister ] );
+			glUniform1f( alphaTestProgram->uAlphaTest, regs[ pStage->alphaTestRegister ] );
 
 			R_GLESD3_DrawElements( tri );
 		}
 		if ( !didDraw ) {
 			drawSolid = true;
 		}
+	} else if ( shader->Coverage() == MC_PERFORATED ) {
+		// the ALPHATEST variant failed to build: fill solid rather than not at
+		// all, accepting wrong depth in the cutouts over holes in the prepass
+		drawSolid = true;
 	}
 
 	if ( drawSolid ) {
 		const idVec4 identityS( 1.0f, 0.0f, 0.0f, 0.0f );
 		const idVec4 identityT( 0.0f, 1.0f, 0.0f, 0.0f );
+		R_GLESD3_UseProgram( program );
+		glUniformMatrix4fv( program->uMVP, 1, GL_FALSE, mvp );
+		const float ignoreVertexColor[ 4 ] = { 0.0f, 1.0f, 0.0f, 1.0f };
+		glUniform4fv( program->uVertexColor, 1, ignoreVertexColor );
 		GL_SelectTexture( 0 );
 		globalImages->whiteImage->Bind();
 		glUniform4fv( program->uTexMatrixS, 1, identityS.ToFloatPtr() );
 		glUniform4fv( program->uTexMatrixT, 1, identityT.ToFloatPtr() );
 		glUniform4fv( program->uColor, 1, color );
-		glUniform1f( program->uAlphaTest, -1.0f );
 
 		R_GLESD3_DrawElements( tri );
 	}
@@ -785,6 +795,8 @@ void RB_GLESD3_FillDepthBuffer( drawSurf_t **drawSurfs, int numDrawSurfs ) {
 	}
 
 	glesProgram_t *program = R_GLESD3_Program( GLESD3_PROGRAM_MATERIAL );
+	glesProgram_t *alphaTestProgram = R_GLESD3_Program( GLESD3_PROGRAM_MATERIAL,
+			GLESD3_VARIANT_ALPHATEST );
 	if ( program == NULL ) {
 		return;
 	}
@@ -804,7 +816,7 @@ void RB_GLESD3_FillDepthBuffer( drawSurf_t **drawSurfs, int numDrawSurfs ) {
 		if ( drawSurfs[i]->material == NULL || drawSurfs[i]->material->SuppressInSubview() ) {
 			continue;
 		}
-		RB_GLESD3_T_FillDepthBuffer( drawSurfs[i], program );
+		RB_GLESD3_T_FillDepthBuffer( drawSurfs[i], program, alphaTestProgram );
 	}
 }
 
@@ -868,7 +880,12 @@ static bool GLESD3_DrawCubeTexgenStage( const drawSurf_t *surf, const shaderStag
 	if ( id == GLESD3_PROGRAM_COUNT ) {
 		return false;
 	}
-	glesProgram_t *program = R_GLESD3_Program( id );
+	// an alpha-tested stage binds the ALPHATEST variant; everything else stays
+	// on the discard-free base program (gles_program.h, D8)
+	const bool alphaTested =
+			R_GLESD3_AlphaTestReference( pStage->drawStateBits ) >= 0.0f;
+	glesProgram_t *program = R_GLESD3_Program( id,
+			alphaTested ? GLESD3_VARIANT_ALPHATEST : GLESD3_VARIANT_BASE );
 	if ( program == NULL || pStage->texture.image == NULL ) {
 		return false;
 	}
@@ -1030,7 +1047,9 @@ static bool GLESD3_DrawBumpyEnvironmentStage( const drawSurf_t *surf, const shad
 		return false;
 	}
 
-	glesProgram_t *program = R_GLESD3_Program( GLESD3_PROGRAM_BUMPY_ENVIRONMENT );
+	glesProgram_t *program = R_GLESD3_Program( GLESD3_PROGRAM_BUMPY_ENVIRONMENT,
+			R_GLESD3_AlphaTestReference( pStage->drawStateBits ) >= 0.0f
+				? GLESD3_VARIANT_ALPHATEST : GLESD3_VARIANT_BASE );
 	if ( program == NULL ) {
 		return false;
 	}
@@ -1084,7 +1103,9 @@ static bool GLESD3_DrawMonochromeStage( const drawSurf_t *surf, const shaderStag
 		return false;
 	}
 
-	glesProgram_t *program = R_GLESD3_Program( GLESD3_PROGRAM_MONOCHROME );
+	glesProgram_t *program = R_GLESD3_Program( GLESD3_PROGRAM_MONOCHROME,
+			R_GLESD3_AlphaTestReference( pStage->drawStateBits ) >= 0.0f
+				? GLESD3_VARIANT_ALPHATEST : GLESD3_VARIANT_BASE );
 	if ( program == NULL ) {
 		return false;
 	}
@@ -1133,8 +1154,10 @@ static bool GLESD3_DrawHeatHazeStage( const drawSurf_t *surf, const shaderStage_
 		}
 	}
 
-	glesProgram_t *program = R_GLESD3_Program( masked
-			? GLESD3_PROGRAM_HEATHAZE_MASK : GLESD3_PROGRAM_HEATHAZE );
+	glesProgram_t *program = R_GLESD3_Program(
+			masked ? GLESD3_PROGRAM_HEATHAZE_MASK : GLESD3_PROGRAM_HEATHAZE,
+			R_GLESD3_AlphaTestReference( pStage->drawStateBits ) >= 0.0f
+				? GLESD3_VARIANT_ALPHATEST : GLESD3_VARIANT_BASE );
 	if ( program == NULL ) {
 		return false;
 	}
@@ -1306,6 +1329,10 @@ static void RB_GLESD3_T_RenderShaderPasses( const drawSurf_t *surf ) {
 	}
 
 	glesProgram_t *program = R_GLESD3_Program( GLESD3_PROGRAM_MATERIAL );
+	// alpha-tested stages bind this variant; NULL degrades them to the base
+	// program (no cutout) rather than dropping the surface
+	glesProgram_t *alphaTestProgram = R_GLESD3_Program( GLESD3_PROGRAM_MATERIAL,
+			GLESD3_VARIANT_ALPHATEST );
 	if ( program == NULL ) {
 		return;
 	}
@@ -1338,6 +1365,12 @@ static void RB_GLESD3_T_RenderShaderPasses( const drawSurf_t *surf ) {
 	}
 	const void *ambientBase = vertexCache.Position( tri->ambientCache );
 
+	// uniforms are per-program: both variants get this surface's MVP up front,
+	// so the per-stage selection below only has to bind
+	if ( alphaTestProgram != NULL ) {
+		R_GLESD3_UseProgram( alphaTestProgram );
+		glUniformMatrix4fv( alphaTestProgram->uMVP, 1, GL_FALSE, mvp );
+	}
 	R_GLESD3_UseProgram( program );
 	glUniformMatrix4fv( program->uMVP, 1, GL_FALSE, mvp );
 
@@ -1511,6 +1544,14 @@ static void RB_GLESD3_T_RenderShaderPasses( const drawSurf_t *surf ) {
 		idVec4 matrixS, matrixT;
 		GLESD3_StageTextureMatrix( &pStage->texture, regs, matrixS, matrixT );
 
+		// an alpha-tested stage draws with the ALPHATEST variant; every other
+		// stage stays on the discard-free base program (gles_program.h, D8)
+		const float alphaTestRef = R_GLESD3_AlphaTestReference( pStage->drawStateBits );
+		glesProgram_t *stageProgram = program;
+		if ( alphaTestRef >= 0.0f && alphaTestProgram != NULL ) {
+			stageProgram = alphaTestProgram;
+		}
+
 		( void )glGetError();	// drain, so the step probe attributes correctly
 		GL_SelectTexture( 0 );
 		GLESD3_StepError( "GL_SelectTexture", shader );
@@ -1519,15 +1560,15 @@ static void RB_GLESD3_T_RenderShaderPasses( const drawSurf_t *surf ) {
 		GL_State( pStage->drawStateBits );
 		GLESD3_StepError( "GL_State", shader );
 
-		glUniform4fv( program->uTexMatrixS, 1, matrixS.ToFloatPtr() );
-		glUniform4fv( program->uTexMatrixT, 1, matrixT.ToFloatPtr() );
-		glUniform4fv( program->uVertexColor, 1, vertexColorPacking );
-		glUniform1f( program->uAlphaTest,
-				R_GLESD3_AlphaTestReference( pStage->drawStateBits ) );
+		R_GLESD3_UseProgram( stageProgram );
+		glUniform4fv( stageProgram->uTexMatrixS, 1, matrixS.ToFloatPtr() );
+		glUniform4fv( stageProgram->uTexMatrixT, 1, matrixT.ToFloatPtr() );
+		glUniform4fv( stageProgram->uVertexColor, 1, vertexColorPacking );
+		glUniform1f( stageProgram->uAlphaTest, alphaTestRef );
 		if ( hasBakedDecalStageColor ) {
-			glUniform4f( program->uColor, 1.0f, 1.0f, 1.0f, 1.0f );
+			glUniform4f( stageProgram->uColor, 1.0f, 1.0f, 1.0f, 1.0f );
 		} else {
-			glUniform4fv( program->uColor, 1, color );
+			glUniform4fv( stageProgram->uColor, 1, color );
 		}
 
 		GLESD3_StepError( "uniforms", shader );

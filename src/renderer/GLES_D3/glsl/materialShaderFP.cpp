@@ -31,7 +31,9 @@ precision highp int;
 uniform sampler2D uTexture0;
 uniform vec4 uColor;
 uniform vec4 uVertexColor;
+#ifdef GLESD3_ALPHATEST
 uniform float uAlphaTest;
+#endif
 
 in vec4 vColor;
 in vec2 vTexCoord;
@@ -44,10 +46,15 @@ void main() {
                            vColor.a   * uVertexColor.z + uVertexColor.w);
     vec4 result = texel * uColor * vertexTerm;
 
-    // ES has no fixed-function alpha test; see gles_draw.cpp.
+#ifdef GLESD3_ALPHATEST
+    // ES has no fixed-function alpha test; see gles_draw.cpp. Compiled in
+    // only for alpha-tested stages: a discard anywhere in a program disables
+    // early-Z/LRZ on tile-based GPUs even for draws that never take it, so
+    // the base variant must not contain one (gles_program.cpp, D8).
     if (uAlphaTest >= 0.0 && result.a <= uAlphaTest) {
         discard;
     }
+#endif
 
     outColor = result;
 }

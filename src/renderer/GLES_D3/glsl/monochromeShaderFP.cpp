@@ -17,7 +17,9 @@ precision highp int;
 
 uniform sampler2D uTexture0;
 uniform vec4 uColor;
+#ifdef GLESD3_ALPHATEST
 uniform float uAlphaTest;
+#endif
 
 in vec2 vTexCoord;
 
@@ -28,9 +30,11 @@ void main() {
     float luminance = dot(sampled.rgb, vec3(0.33));
     vec4 color = vec4(vec3(luminance), sampled.a) * uColor;
 
+#ifdef GLESD3_ALPHATEST
     if (uAlphaTest >= 0.0 && color.a <= uAlphaTest) {
         discard;
     }
+#endif
     fragColor = color;
 }
 )";

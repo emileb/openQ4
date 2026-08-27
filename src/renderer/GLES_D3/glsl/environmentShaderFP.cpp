@@ -15,7 +15,9 @@ precision highp samplerCube;
 
 uniform samplerCube uCubeMap;
 uniform vec4 uColor;
+#ifdef GLESD3_ALPHATEST
 uniform float uAlphaTest;
+#endif
 
 in vec3 vNormal;
 in vec3 vToEye;
@@ -30,9 +32,11 @@ void main() {
 
     vec4 color = texture(uCubeMap, r) * uColor * vColor;
 
+#ifdef GLESD3_ALPHATEST
     if (uAlphaTest >= 0.0 && color.a <= uAlphaTest) {
         discard;
     }
+#endif
     fragColor = color;
 }
 )";

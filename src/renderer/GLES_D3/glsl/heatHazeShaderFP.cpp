@@ -32,7 +32,9 @@ uniform sampler2D uTexture1;	// the deform normal map
 // uParms[7].xy = the viewport origin in window coordinates
 uniform vec4 uParms[8];
 
+#ifdef GLESD3_ALPHATEST
 uniform float uAlphaTest;
+#endif
 
 in vec2 vMaskTexCoord;
 in vec2 vScrollTexCoord;
@@ -53,9 +55,11 @@ void main() {
 
     vec4 color = vec4(texture(uTexture0, screenTexCoord.xy).rgb, 1.0);
 
+#ifdef GLESD3_ALPHATEST
     if (uAlphaTest >= 0.0 && color.a <= uAlphaTest) {
         discard;
     }
+#endif
     fragColor = color;
 }
 )";

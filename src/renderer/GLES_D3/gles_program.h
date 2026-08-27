@@ -88,7 +88,6 @@ typedef struct glesProgram_s {
 	GLint		uSpecularMatrixT;
 	GLint		uDiffuseColor;
 	GLint		uSpecularColor;
-	GLint		uAmbientLight;
 	GLint		uAmbientDir;
 
 	// stencil shadow program only
@@ -149,14 +148,45 @@ typedef enum {
 	GLESD3_PROGRAM_COUNT
 } glesD3ProgramId_t;
 
+/*
+====================
+glesD3ProgramVariant_t
+
+Compile-time shader specialisation (D8). A `discard` anywhere in a fragment
+shader disables early-Z / LRZ / FPK on tile-based mobile GPUs for every draw
+that binds it, even when the test never fires -- so the shader-side alpha
+test cannot live behind a runtime uniform in the common path. Each program
+that alpha-tests is therefore linked twice: the BASE variant carries no
+uAlphaTest and no discard, and the ALPHATEST variant is the same source with
+GLESD3_ALPHATEST defined. The interaction program splits the same way on
+GLESD3_AMBIENT, removing the per-fragment uniform test (and the always-black
+specular chain) from the per-light hot path.
+
+The define is spliced in directly after the `#version` line, identically for
+the embedded source and a disk override, so a shader file on disk stays
+byte-identical to what ships and compiles standalone as the BASE variant.
+
+A program declares at most one alternate define, so the table is two slots
+wide; asking for a variant a program does not declare returns NULL, the same
+fail-closed contract as a program that failed to link.
+====================
+*/
+typedef enum {
+	GLESD3_VARIANT_BASE = 0,
+	GLESD3_VARIANT_ALPHATEST,	// GLESD3_ALPHATEST: uAlphaTest + discard compiled in
+	GLESD3_VARIANT_AMBIENT		// GLESD3_AMBIENT: interaction lit by uAmbientDir
+} glesD3ProgramVariant_t;
+
 // Builds every program. Safe to call repeatedly; reload goes through here.
 // Returns false if any program failed, having logged each failure by name.
 bool			R_GLESD3_Programs_Init( void );
 void			R_GLESD3_Programs_Shutdown( void );
 
-// NULL when the id is out of range or the program failed to link, so callers
-// can fail closed on a per-pass basis rather than drawing with program 0.
-glesProgram_t *	R_GLESD3_Program( glesD3ProgramId_t id );
+// NULL when the id is out of range, the program failed to link, or the
+// program does not declare the requested variant, so callers can fail closed
+// on a per-pass basis rather than drawing with program 0.
+glesProgram_t *	R_GLESD3_Program( glesD3ProgramId_t id,
+		glesD3ProgramVariant_t variant = GLESD3_VARIANT_BASE );
 
 // glUseProgram with redundancy filtering against the backend's own shadow of
 // the current program.
