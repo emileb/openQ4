@@ -142,7 +142,7 @@ static void RB_GLESD3_T_Shadow( const drawSurf_t *surf ) {
 
 	// a surface that could not use the external optimization has had its
 	// no-caps counts forced back to the full count; treat it as internal so
-	// the robust two-pass preload still runs
+	// the robust depth-fail path below runs
 	if ( numIndexes == tri->numIndexes ) {
 		external = false;
 	}
@@ -160,15 +160,26 @@ static void RB_GLESD3_T_Shadow( const drawSurf_t *surf ) {
 
 	GL_Cull( CT_TWO_SIDED );
 
-	// patent-free work around: preload the stencil with the number of volumes
-	// clipped by the near or far clip plane
 	if ( !external ) {
-		glStencilOpSeparate( frontSidedFace, GL_KEEP, tr.stencilDecr, tr.stencilDecr );
-		glStencilOpSeparate( backSidedFace, GL_KEEP, tr.stencilIncr, tr.stencilIncr );
+		// Depth-fail ("Carmack's reverse"; the patent expired in 2019, after
+		// the preload workaround was written). One capped draw counting the
+		// volume faces that FAIL the depth test.
+		//
+		// This is fragment-for-fragment what the old preload + depth-pass pair
+		// computed: preload wrote front -1 / back +1 on every fragment, the
+		// depth-pass draw wrote front +1 / back -1 where depth passed, and with
+		// the wrap ops the mod-2^N sums cancel to exactly "front -1 / back +1
+		// where depth fails". Same stencil buffer, half the stencil fill --
+		// which on a mobile tiler is the dominant cost of every volume the
+		// view sits inside.
+		glStencilOpSeparate( frontSidedFace, GL_KEEP, tr.stencilDecr, GL_KEEP );
+		glStencilOpSeparate( backSidedFace, GL_KEEP, tr.stencilIncr, GL_KEEP );
 		GLESD3_DrawShadowElements( tri, numIndexes );
+		return;
 	}
 
-	// traditional depth-pass stencil shadows
+	// traditional depth-pass stencil shadows for external volumes, which are
+	// never clipped by the near plane and need no caps
 	glStencilOpSeparate( frontSidedFace, GL_KEEP, GL_KEEP, tr.stencilIncr );
 	glStencilOpSeparate( backSidedFace, GL_KEEP, GL_KEEP, tr.stencilDecr );
 	GLESD3_DrawShadowElements( tri, numIndexes );
