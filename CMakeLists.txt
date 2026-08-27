@@ -136,30 +136,58 @@ endif()
 
 function(oq4_ensure_pak PAK_NAME SOURCE_SUBDIR)
     set(_pak "${OPENQ4_PAK_DIR}/${PAK_NAME}")
-    # The filter set is part of the pack's identity, so a stamp beside it forces
-    # a repack when it changes. Without this, flipping OPENQ4_MINIMAL_PAK1 would
-    # silently keep whichever pack happened to be there and then bake its MD5
-    # into the header, which is a fatal error at runtime rather than a warning.
-    set(_stamp "${_pak}.filters")
+    # A pack's identity is its CONTENT plus its filter set, and both have to be
+    # able to invalidate a cached pak.
+    #
+    # Filters alone are not enough. The source manifest is the only thing that
+    # notices a file arriving from upstream, and a pak that silently predates
+    # one is not a build error: generate_pak_header.py takes its MD5 from
+    # whatever pak is sitting here, so the header always agrees with the stale
+    # pack, the engine's integrity check passes, and the content is simply
+    # missing at runtime. That is how a release shipped with no Russian or
+    # Polish string tables -- a config directory packed before those tables
+    # landed was reused for weeks, and nothing in the build could tell.
+    #
+    # The manifest carries a size and an mtime per entry, so this also catches
+    # an edited file of the same length. Writing it is a stat-only walk of the
+    # source tree, so doing it unconditionally costs nothing next to the pack
+    # it guards.
+    set(_stamp "${_pak}.stamp")
     string(REPLACE ";" " " _filter_text "${ARGN}")
+    set(_manifest "${OQ4_GEN}/${PAK_NAME}.sources")
+    oq4_run_script(_manifest_out "${OQ4_ROOT}/tools/build/write_pak_manifest.py"
+        "${OQ4_ROOT}" "${PAK_NAME}" "${SOURCE_SUBDIR}" "${_manifest}")
+    file(MD5 "${_manifest}" _manifest_md5)
+    set(_identity "filters=${_filter_text}\ncontent=${_manifest_md5}\n")
+
     set(_existing "")
     if(EXISTS "${_stamp}")
         file(READ "${_stamp}" _existing)
     endif()
-    if(EXISTS "${_pak}" AND _existing STREQUAL _filter_text)
+    if(EXISTS "${_pak}" AND _existing STREQUAL _identity)
         return()
     endif()
     message(STATUS "openQ4: packing ${PAK_NAME}")
-    oq4_run_script(_manifest_out "${OQ4_ROOT}/tools/build/write_pak_manifest.py"
-        "${OQ4_ROOT}" "${PAK_NAME}" "${SOURCE_SUBDIR}" "${OQ4_GEN}/${PAK_NAME}.sources")
     oq4_run_script(_pack_out "${OQ4_ROOT}/tools/build/build_openq4_pack.py"
         --pak-name "${PAK_NAME}"
         --source-dir "${OQ4_ROOT}/${SOURCE_SUBDIR}"
-        --manifest "${OQ4_GEN}/${PAK_NAME}.sources"
+        --manifest "${_manifest}"
         --out "${_pak}"
         ${ARGN})
-    file(WRITE "${_stamp}" "${_filter_text}")
+    file(WRITE "${_stamp}" "${_identity}")
 endfunction()
+
+# CONFIGURE_DEPENDS makes the generated build system re-run these globs on every
+# build and re-configure when the result changes. That is what turns "a file was
+# added to or removed from the pak content" into an actual repack.
+#
+# Without it CMake only reconfigures when CMakeLists.txt changes -- and AGP
+# short-circuits its own configureCMake task on the same reasoning, so the task
+# can run while cmake itself never re-executes. A language table added upstream
+# then sits in content/ indefinitely without ever reaching a pak, which is
+# exactly how a release shipped with no Russian or Polish strings.
+file(GLOB_RECURSE OPENQ4_PAK0_CONTENT CONFIGURE_DEPENDS "${OQ4_ROOT}/content/baseoq4/pak0/*")
+file(GLOB_RECURSE OPENQ4_PAK1_CONTENT CONFIGURE_DEPENDS "${OQ4_ROOT}/content/baseoq4/pak1/*")
 
 oq4_ensure_pak(pak0.pk4 content/baseoq4/pak0)
 oq4_ensure_pak(pak1.pk4 content/baseoq4/pak1 ${OPENQ4_PAK1_EXCLUDES})
