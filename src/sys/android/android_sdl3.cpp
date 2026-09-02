@@ -215,8 +215,38 @@ Quake4_GetScreenMode
 Mirrors touchscreemode_t in Clibs_OpenTouch/game_interface.h.
 ====================
 */
+/*
+====================
+Quake4_FatalConsoleActive / Quake4_FatalConsoleDismiss
+
+The host input thread has no other way to reach the fatal-error wait: the touch
+overlay queues into a ring buffer that only Sys_SDL_PumpEvents drains, and that
+is not running once Sys_Error has taken over.
+====================
+*/
+extern "C" int Quake4_FatalConsoleActive( void ) {
+	return Posix_ConsoleFatalErrorActive() ? 1 : 0;
+}
+
+extern "C" void Quake4_FatalConsoleDismiss( void ) {
+	Posix_ConsoleRequestFatalDismiss();
+}
+
 extern "C" int Quake4_GetScreenMode( void ) {
 	enum { TS_BLANK = 0, TS_MENU = 1, TS_GAME = 2, TS_MAP = 3, TS_CONSOLE = 4 };
+
+	// The fatal-error console owns the screen and the process is on its way
+	// out, so no game or menu pad means anything from here. TS_BLANK is the
+	// overlay's own empty set -- one full-screen invisible button that sends
+	// enter -- so the error text stays readable and a tap still dismisses it.
+	//
+	// Any other mode draws real controls, and they are drawn with GL state set
+	// up for the game window the fatal path has just hidden: the pads come out
+	// opaque because nothing clears behind them, and they fight the console's
+	// own render loop for the surface, which is the flicker.
+	if ( Posix_ConsoleFatalErrorActive() ) {
+		return TS_BLANK;
+	}
 
 	if ( console != NULL && console->Active() ) {
 		return TS_CONSOLE;

@@ -147,6 +147,17 @@ static volatile int commandNext;
 
 static void queueEvent(int type, int a, int b)
 {
+    // While the fatal-error console is up nothing drains this queue, so an
+    // event put here is lost. Any input at all -- a screen tap through the
+    // blank control set, or the back key -- means the player is done reading,
+    // so end the wait instead of queueing. Sys_Error then exits the process and
+    // the host activity returns.
+    if (Quake4_FatalConsoleActive())
+    {
+        Quake4_FatalConsoleDismiss();
+        return;
+    }
+
     int head = eventHead;
     int next = (head + 1) % EVENT_QUEUE_SIZE;
 
