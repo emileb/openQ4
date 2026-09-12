@@ -6971,6 +6971,11 @@ bool idSessionLocal::ProcessEvent( const sysEvent_t *event ) {
 		return true;
 	}
 
+	// let the game module consume raw events first (game API 44)
+	if ( game && game->HandleEvent( event ) ) {
+		return true;
+	}
+
 	// in game, exec bindings for all key downs
 	if ( event->evType == SE_KEY && event->evValue2 == 1 ) {
 		idKeyInput::ExecKeyBinding( event->evValue );
