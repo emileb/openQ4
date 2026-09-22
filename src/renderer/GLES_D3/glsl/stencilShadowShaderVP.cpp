@@ -4,20 +4,22 @@
 //
 // Shadow geometry is shadowCache_t, a bare idVec4 per vertex (Model.h:69),
 // using the homogeneous-coordinate trick: w == 1 marks a vertex that stays
-// where it is, w == 0 one that must be projected to infinity away from the
-// light.
+// where it is, w == 0 one that is a direction, i.e. a point at infinity.
 //
-// With uLightOrigin carrying w == 0 (the CPU sets it that way, matching the
-// ARB2 path's PP_LIGHT_ORIGIN), one expression covers both:
+// On this back end the CPU has already finished the extrusion. The back end
+// reports no vertex programs, so a dynamic light's volumes come from the
+// non-vertex-program turbo builder (tr_turboshadow.cpp ->
+// idSIMD::CreateShadowCache), which stores each far vertex as
+// (vertex - lightOrigin, 0): a direction away from the light. Static
+// volumes from the classic builder carry w == 1 throughout. Either way the
+// vertex is a complete homogeneous position and only needs the MVP.
 //
-//     inPosition.w * uLightOrigin + inPosition - uLightOrigin
-//
-//   w == 1  ->  inPosition                      the near cap, unmoved
-//   w == 0  ->  inPosition - uLightOrigin       a direction, i.e. a point at
-//                                               infinity along the light ray
-//
-// This is what the ARB2 shadow vertex program does, and what the d3es GLES
-// port does; it needs no depth clamp, which is fortunate because ES has none.
+// The ARB2 vertex program formula, w * lightOrigin + position - lightOrigin,
+// belongs with the OTHER cache layout -- R_CreateVertexProgramShadowCache
+// stores (vertex, 0) and leaves the subtraction to the program. Applying it
+// here subtracted the light origin a second time, so every dynamic volume
+// extruded away from a phantom light at twice the real one's position:
+// flashlight shadows that sat still while the light moved.
 
 #include "glsl_shaders.h"
 
@@ -34,9 +36,8 @@ invariant gl_Position;
 layout(location = 0) in vec4 inPosition;
 
 uniform mat4 uMVP;
-uniform vec4 uLightOrigin;
 
 void main() {
-    gl_Position = uMVP * (inPosition.w * uLightOrigin + inPosition - uLightOrigin);
+    gl_Position = uMVP * inPosition;
 }
 )";
