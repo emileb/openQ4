@@ -226,6 +226,8 @@ if(OPENQ4_PAK_ASSET_DIR)
             "${OPENQ4_PAK_DIR}/${_staged_name}"
             "${OPENQ4_PAK_ASSET_DIR}/${_staged_name}"
             ONLY_IF_DIFFERENT)
+        # A clean deletes the staged copy but not this configure; missing, it reconfigures.
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${OPENQ4_PAK_ASSET_DIR}/${_staged_name}")
     endforeach()
     message(STATUS "openQ4: staged pak0.pk4, pak1.pk4 and mod.json into ${OPENQ4_PAK_ASSET_DIR}")
 endif()
