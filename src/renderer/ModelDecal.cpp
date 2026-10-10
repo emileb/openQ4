@@ -732,6 +732,16 @@ void idRenderModelDecal::AddDecalDrawSurf( viewEntity_t *space ) {
 	// Snapshot the vertices plus any per-stage color blocks into one transient
 	// upload so the draw surf matches Quake 4's frame-temp decal submission.
 	newTri->ambientCache = vertexCache.AllocFrameTemp( vertexAndColorData, totalAmbientBytes );
+	// Upload the indexes here too, as tr_deform does, when the profile wants
+	// index buffers. Left NULL, a back end that cannot draw from client memory
+	// (ES) uploads them on every draw instead, mid-frame into a buffer the
+	// GPU is already reading: on Adreno that stalls each decal draw on the
+	// GPU, and a firefight's bullet holes took a phone from 46 to 15 fps.
+	newTri->indexCache = NULL;
+	if ( r_useIndexBuffers.GetBool() && newTri->numIndexes > 0 ) {
+		newTri->indexCache = vertexCache.AllocFrameTemp( newTri->indexes,
+				newTri->numIndexes * sizeof( newTri->indexes[0] ), true );
+	}
 
 	// create the drawsurf
 	R_AddDrawSurf( newTri, space, &space->entityDef->parms, material, space->scissorRect );
