@@ -15,7 +15,7 @@
 #   brightness (no hardware gamma  r_brightness          F10  cycles 1 / 1.25 / 1.5
 #     ramp on ES, so this is now a shader pass)
 #   gamma                          r_gamma               F11  cycles 1 / 1.2 / 1.4
-#   shadow maps (soft, filtered)   r_useShadowMap        HOME
+#   shadow maps (soft, filtered)   r_useShadowMap        O
 #     instead of the hard-edged stencil shadows; lights the maps cannot serve
 #     keep stencil, so turning this on never removes a shadow
 #
@@ -154,7 +154,7 @@ done
 
 LOG="${OPENQ4_LOG:-/tmp/openq4-gles.log}"
 echo "logging to $LOG" >&2
-echo "live keys: F4 GLSL programs  F8 depth hack  F10 brightness  F11 gamma  HOME shadow maps  F9 view position" >&2
+echo "live keys: F4 GLSL programs  F8 depth hack  F10 brightness  F11 gamma  O shadow maps  F9 view position" >&2
 
 # r_renderApi and r_renderer are archived; pass both so a stale config cannot
 # redirect the run (see run_glesd3.sh). con_noPrint 0 puts the toggles' echo
@@ -173,7 +173,7 @@ echo "live keys: F4 GLSL programs  F8 depth hack  F10 brightness  F11 gamma  HOM
 	+bind F8 "toggle r_glesD3DepthHack" \
 	+bind F10 "toggle r_brightness 1 1.25 1.5" \
 	+bind F11 "toggle r_gamma 1 1.2 1.4" \
-	+bind HOME "toggle r_useShadowMap" \
+	+bind o "toggle r_useShadowMap" \
 	+bind F9 getviewpos \
 	+set g_autoSkipCinematics 1 \
 	2>&1 | tee "$LOG"
