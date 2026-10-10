@@ -77,6 +77,7 @@ bool	R_GLESD3_BindDrawVertAttributes( const srfTriangles_t *tri );
 bool	R_GLESD3_BindCubeTexDirAttribute( const drawSurf_t *surf, bool fromNormal );
 void	R_GLESD3_DisableCubeTexDirAttribute( void );
 void	R_GLESD3_EnableAttributesForShadow( void );
+void	R_GLESD3_DisableAllAttributes( void );
 void	R_GLESD3_InvalidateAttributeState( void );
 vertCache_t *	R_GLESD3_EnsureIndexCache( const srfTriangles_t *tri );
 bool	R_GLESD3_DrawElements( const srfTriangles_t *tri );
@@ -99,6 +100,16 @@ drawn with program 0.
 ====================
 */
 bool	RB_GLESD3_EnsureResources( void );
+
+/*
+====================
+RB_GLESD3_ApplyColorMappings
+
+r_gamma and r_brightness for a context with no hardware gamma ramp, which on
+ES is every context. Called at swap from RB_ApplyColorMappingsToBackBuffer.
+====================
+*/
+void	RB_GLESD3_ApplyColorMappings( void );
 
 // gles_shaderpasses.cpp -- authored material stages, 2D and GUI.
 // Returns the number of surfaces consumed; stops at the first SS_POST_PROCESS

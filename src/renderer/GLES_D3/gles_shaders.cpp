@@ -58,6 +58,8 @@ const char *R_GLESD3_EmbeddedShaderSource( glesD3ProgramId_t id, GLenum stage ) 
 			return vertex ? glesHeatHazeShaderVP : glesHeatHazeMaskShaderFP;
 		case GLESD3_PROGRAM_MONOCHROME:
 			return vertex ? glesMonochromeShaderVP : glesMonochromeShaderFP;
+		case GLESD3_PROGRAM_COLOR_MAPPING:
+			return vertex ? glesColorMappingShaderVP : glesColorMappingShaderFP;
 		default:
 			return NULL;
 	}
@@ -97,6 +99,8 @@ const char *R_GLESD3_ProgramName( glesD3ProgramId_t id ) {
 			return "gles_d3_heathaze_mask";
 		case GLESD3_PROGRAM_MONOCHROME:
 			return "gles_d3_monochrome";
+		case GLESD3_PROGRAM_COLOR_MAPPING:
+			return "gles_d3_colormapping";
 		default:
 			return "unknown";
 	}

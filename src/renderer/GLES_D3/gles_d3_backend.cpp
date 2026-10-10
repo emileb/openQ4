@@ -666,4 +666,79 @@ void RB_GLESD3_DrawView( void ) {
 	backEnd.currentScissor.y2 = glConfig.vidHeight - 1;
 }
 
+/*
+====================
+RB_GLESD3_ApplyColorMappings
+
+RB_ApplyColorMappingsToBackBuffer (draw_common.cpp:6420), which this module
+excludes. GLimp_SetGamma does nothing on an ES context, so before this the
+in-game brightness and gamma settings had no effect on Android at all.
+
+Same shape as the desktop pass: copy the finished back buffer -- world, HUD
+and menus alike, as a hardware ramp would affect -- into _currentRender and
+draw it back through the curve. Free at the defaults: a neutral setting
+returns before the copy.
+====================
+*/
+void RB_GLESD3_ApplyColorMappings( void ) {
+	const float brightness = idMath::ClampFloat( 0.0f, 16.0f, r_brightness.GetFloat() );
+	const float gamma = Max( r_gamma.GetFloat(), 0.001f );
+	if ( idMath::Fabs( brightness - 1.0f ) <= 0.0001f && idMath::Fabs( gamma - 1.0f ) <= 0.0001f ) {
+		return;
+	}
+
+	const int width = glConfig.vidWidth;
+	const int height = glConfig.vidHeight;
+	idImage *sceneImage = globalImages->currentRenderImage;
+	if ( sceneImage == NULL || width <= 0 || height <= 0 ) {
+		return;
+	}
+	if ( !RB_GLESD3_EnsureResources() ) {
+		return;
+	}
+	const glesProgram_t *program = R_GLESD3_Program( GLESD3_PROGRAM_COLOR_MAPPING );
+	if ( program == NULL ) {
+		return;
+	}
+
+	RB_LogComment( "---------- RB_GLESD3_ApplyColorMappings ----------\n" );
+
+	// the back buffer, not whatever target the last view left bound: with
+	// backEnd.renderTexture set, CopyFramebuffer would read that instead
+	idRenderTexture::BindNull();
+	backEnd.renderTexture = NULL;
+	glViewport( 0, 0, width, height );
+	glScissor( 0, 0, width, height );
+	backEnd.currentScissor.x1 = 0;
+	backEnd.currentScissor.y1 = 0;
+	backEnd.currentScissor.x2 = width - 1;
+	backEnd.currentScissor.y2 = height - 1;
+
+	if ( !sceneImage->CopyFramebuffer( 0, 0, width, height ) ) {
+		return;
+	}
+	const int textureWidth = sceneImage->GetOpts().width;
+	const int textureHeight = sceneImage->GetOpts().height;
+	if ( textureWidth <= 0 || textureHeight <= 0 ) {
+		return;
+	}
+
+	R_GLESD3_Draw_BeginView();
+	R_GLESD3_DisableAllAttributes();
+	glDisable( GL_STENCIL_TEST );
+	GL_Cull( CT_TWO_SIDED );
+	GL_State( GLS_DEPTHFUNC_ALWAYS | GLS_DEPTHMASK );
+
+	R_GLESD3_UseProgram( program );
+	glUniform4f( program->uColor, brightness, gamma,
+			(float)width / (float)textureWidth, (float)height / (float)textureHeight );
+	GL_SelectTexture( 0 );
+	sceneImage->Bind();
+
+	glDrawArrays( GL_TRIANGLES, 0, 3 );
+
+	globalImages->BindNull();
+	R_GLESD3_Draw_EndView();
+}
+
 #endif /* OPENQ4_RENDERER_GLES_MODULE */

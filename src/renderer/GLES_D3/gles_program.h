@@ -145,6 +145,8 @@ typedef enum {
 	GLESD3_PROGRAM_HEATHAZE,
 	GLESD3_PROGRAM_HEATHAZE_MASK,
 	GLESD3_PROGRAM_MONOCHROME,
+	// r_gamma / r_brightness over the finished back buffer, at swap time
+	GLESD3_PROGRAM_COLOR_MAPPING,
 	GLESD3_PROGRAM_COUNT
 } glesD3ProgramId_t;
 

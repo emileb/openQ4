@@ -190,6 +190,12 @@ void R_GLESD3_EnableAttributesForShadow( void ) {
 	R_GLESD3_EnableAttributes( 1 << GLESD3_ATTR_POSITION );
 }
 
+// For draws whose vertices come from gl_VertexID alone, like the fullscreen
+// colour-mapping triangle.
+void R_GLESD3_DisableAllAttributes( void ) {
+	R_GLESD3_EnableAttributes( 0 );
+}
+
 /*
 ====================
 R_GLESD3_InvalidateAttributeState

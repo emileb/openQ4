@@ -108,4 +108,9 @@ extern const char * const glesHeatHazeMaskShaderFP;
 extern const char * const glesMonochromeShaderVP;
 extern const char * const glesMonochromeShaderFP;
 
+// r_gamma / r_brightness applied to the finished back buffer at swap; ES has
+// no hardware gamma ramp. The curve of builtin/final_color_mapping.
+extern const char * const glesColorMappingShaderVP;
+extern const char * const glesColorMappingShaderFP;
+
 #endif /* !__GLES_D3_GLSL_SHADERS_H__ */
