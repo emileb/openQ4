@@ -85,7 +85,9 @@ static const int GLESD3_SHADOW_SLOT_UNSHADOWED = -2;
 static glesShadowSlot_t		gles_shadow2D[ GLESD3_SHADOW_MAX_SLOTS ];
 static glesShadowSlot_t		gles_shadowCube[ GLESD3_SHADOW_MAX_SLOTS ];
 static GLuint				gles_shadowFbo = 0;
-static bool					gles_shadowResourcesFailed = false;
+// allocation failures are logged once and retried next view rather than
+// disabling maps for the session (see GLESD3_ShadowEnsureSlot)
+static bool					gles_shadowAllocationWarned = false;
 
 static glesShadowLight_t	gles_shadowLights[ GLESD3_SHADOW_MAX_LIGHTS ];
 static int					gles_numShadowLights = 0;
@@ -129,7 +131,7 @@ void RB_GLESD3_ShutdownShadowMaps( void ) {
 		glDeleteFramebuffers( 1, &gles_shadowFbo );
 		gles_shadowFbo = 0;
 	}
-	gles_shadowResourcesFailed = false;
+	gles_shadowAllocationWarned = false;
 	gles_numShadowLights = 0;
 	gles_shadowViewDef = NULL;
 }
@@ -163,10 +165,17 @@ static bool GLESD3_ShadowEnsureSlot( glesShadowSlot_t &slot, bool cube, int size
 	GLESD3_ShadowDeleteSlot( slot );
 
 	const GLenum target = cube ? GL_TEXTURE_CUBE_MAP : GL_TEXTURE_2D;
+	// GL keeps one pending flag per error kind, and the engine routinely
+	// arrives here with one set (r_glesD3Report shows entryErr=0x0500 at view
+	// start). Draining a single call left a stale INVALID_OPERATION to be
+	// blamed on this allocation, which used to switch shadow maps off for the
+	// whole session -- seen in an interactive run that went through the menu
+	// first. Drain them all.
+	for ( int i = 0; i < 16 && glGetError() != GL_NO_ERROR; i++ ) {
+	}
 	glGenTextures( 1, &slot.texture );
 	GL_SelectTexture( 6 );
 	R_BindTextureForDirectAccess( target, slot.texture );
-	( void )glGetError();
 	if ( cube ) {
 		for ( int face = 0; face < 6; face++ ) {
 			glTexImage2D( GL_TEXTURE_CUBE_MAP_POSITIVE_X + face, 0, GL_DEPTH_COMPONENT24, size, size, 0,
@@ -182,8 +191,12 @@ static bool GLESD3_ShadowEnsureSlot( glesShadowSlot_t &slot, bool cube, int size
 
 	const GLenum err = glGetError();
 	if ( err != GL_NO_ERROR ) {
-		common->Warning( "gles_d3: %s shadow map %ix%i allocation raised 0x%04x",
-				cube ? "cube" : "2D", size, size, err );
+		if ( !gles_shadowAllocationWarned ) {
+			gles_shadowAllocationWarned = true;
+			common->Warning( "gles_d3: %s shadow map %ix%i allocation raised 0x%04x; "
+					"those lights keep stencil shadows this view and it is retried",
+					cube ? "cube" : "2D", size, size, err );
+		}
 		GLESD3_ShadowDeleteSlot( slot );
 		return false;
 	}
@@ -650,7 +663,7 @@ void RB_GLESD3_RenderShadowMaps( void ) {
 	gles_shadowMappedPasses = gles_shadowStencilPasses = gles_shadowCasterDraws = 0;
 
 	const viewDef_t *viewDef = backEnd.viewDef;
-	if ( !r_useShadowMap.GetBool() || !r_shadows.GetBool() || gles_shadowResourcesFailed
+	if ( !r_useShadowMap.GetBool() || !r_shadows.GetBool()
 			|| viewDef == NULL || viewDef->viewEntitys == NULL || viewDef->viewLights == NULL ) {
 		return;
 	}
@@ -762,19 +775,19 @@ void RB_GLESD3_RenderShadowMaps( void ) {
 			}
 			glesShadowSlot_t &slot = light.point ? gles_shadowCube[ used ] : gles_shadow2D[ used ];
 			if ( !GLESD3_ShadowEnsureSlot( slot, light.point, light.size ) ) {
-				gles_shadowResourcesFailed = true;
+				// this pass stays stencil, and no more maps are attempted this
+				// view; the next view retries
 				ok = false;
 				break;
 			}
 			light.slot[ pass ] = used++;
 		}
+		if ( light.slot[0] != -1 || light.slot[1] != -1 ) {
+			gles_numShadowLights++;
+		}
 		if ( !ok ) {
 			break;
 		}
-		if ( light.slot[0] == -1 && light.slot[1] == -1 ) {
-			continue;
-		}
-		gles_numShadowLights++;
 	}
 
 	if ( gles_numShadowLights == 0 ) {
