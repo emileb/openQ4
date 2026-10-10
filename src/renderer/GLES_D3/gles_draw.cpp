@@ -25,6 +25,7 @@ static int		gles_enabledAttributes = 0;
 static bool		gles_weaponDepthRange = false;
 static int		gles_weaponDepthHackDraws = 0;
 static int		gles_modelDepthHackDraws = 0;
+static int		gles_backEndIndexUploads = 0;
 
 /*
 ====================
@@ -89,6 +90,7 @@ void R_GLESD3_Draw_BeginView( void ) {
 	gles_weaponDepthRange = false;
 	gles_weaponDepthHackDraws = 0;
 	gles_modelDepthHackDraws = 0;
+	gles_backEndIndexUploads = 0;
 }
 
 void R_GLESD3_Draw_EndView( void ) {
@@ -151,6 +153,11 @@ void R_GLESD3_SpaceMVP( const viewEntity_t *space, float mvp[16] ) {
 void R_GLESD3_DepthHackCounts( int &weaponDraws, int &modelDraws ) {
 	weaponDraws = gles_weaponDepthHackDraws;
 	modelDraws = gles_modelDepthHackDraws;
+}
+
+// back-end CPU-index uploads in the current view, for r_glesD3Report
+int R_GLESD3_BackEndIndexUploads( void ) {
+	return gles_backEndIndexUploads;
 }
 
 /*
@@ -345,6 +352,11 @@ vertCache_t *R_GLESD3_EnsureIndexCache( const srfTriangles_t *tri ) {
 	if ( tri->indexes == NULL ) {
 		return NULL;
 	}
+	// Each of these is an upload in the middle of the back end, into a buffer
+	// the GPU is already reading -- on Adreno a stall per draw (4b0f549f).
+	// r_glesD3Report counts them; geometry that lands here every frame wants a
+	// front-end index cache instead.
+	gles_backEndIndexUploads++;
 	// A frame temp, not a write-back into tri->indexCache: some of the geometry
 	// that lands here is persistent (light interaction tris are owned by the
 	// interaction cache) and a frame-temp stored on it would dangle next frame.

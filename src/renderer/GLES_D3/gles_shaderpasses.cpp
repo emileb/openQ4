@@ -1993,7 +1993,11 @@ static void RB_GLESD3_T_RenderShaderPasses( const drawSurf_t *surf ) {
 			stageProgram = alphaTestProgram;
 		}
 
-		( void )glGetError();	// drain, so the step probe attributes correctly
+		// drain, so the step probe attributes correctly; only when it is armed,
+		// since a glGetError per stage is a driver round trip on every draw
+		if ( r_glesD3Report.GetInteger() >= 2 ) {
+			( void )glGetError();
+		}
 		GL_SelectTexture( 0 );
 		GLESD3_StepError( "GL_SelectTexture", shader );
 		GLESD3_BindStageImage( &pStage->texture, regs );
