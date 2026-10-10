@@ -660,7 +660,7 @@ static void RB_GLESD3_T_FillDepthBuffer( const drawSurf_t *surf, glesProgram_t *
 		backEnd.currentSpace = surf->space;
 	}
 	float mvp[ 16 ];
-	myGlMultMatrix( surf->space->modelViewMatrix, backEnd.viewDef->projectionMatrix, mvp );
+	R_GLESD3_SpaceMVP( surf->space, mvp );
 
 	// an empty rect covers no pixels: skip rather than issue a rejected call
 	if ( !RB_GLESD3_SetScissor( surf->scissorRect ) ) {
@@ -1342,7 +1342,7 @@ static void RB_GLESD3_T_RenderShaderPasses( const drawSurf_t *surf ) {
 		backEnd.currentSpace = surf->space;
 	}
 	float mvp[ 16 ];
-	myGlMultMatrix( surf->space->modelViewMatrix, backEnd.viewDef->projectionMatrix, mvp );
+	R_GLESD3_SpaceMVP( surf->space, mvp );
 
 	// an empty rect covers no pixels: skip rather than issue a rejected call
 	if ( !RB_GLESD3_SetScissor( surf->scissorRect ) ) {

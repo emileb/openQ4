@@ -83,6 +83,10 @@ bool	R_GLESD3_DrawElements( const srfTriangles_t *tri );
 float	R_GLESD3_AlphaTestReference( int stateBits );
 void	R_GLESD3_SetupProgramForDraw( const struct glesProgram_s *program,
 				const float mvp[16], const idVec4 &color );
+// A space's MVP with the weapon/model depth hacks applied; also sets the
+// matching depth range, so call it for every 3D surface, not just the hacked ones.
+void	R_GLESD3_SpaceMVP( const viewEntity_t *space, float mvp[16] );
+void	R_GLESD3_DepthHackCounts( int &weaponDraws, int &modelDraws );
 
 /*
 ====================

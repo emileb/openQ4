@@ -621,11 +621,14 @@ void RB_GLESD3_DrawView( void ) {
 		RB_GLESD3_SamplePixels( samples );
 		int fogLights = 0, blendLights = 0, fogDraws = 0, fogSkips = 0;
 		RB_GLESD3_FogBlendCounts( fogLights, blendLights, fogDraws, fogSkips );
+		int weaponHackDraws = 0, modelHackDraws = 0;
+		R_GLESD3_DepthHackCounts( weaponHackDraws, modelHackDraws );
 		common->Printf( "glesd3 afterMaterial(view %i): drawElements=%i px[ %s] "
-				"fog=%i/%i draws=%i skipped=%i err=0x%04x\n",
+				"fog=%i/%i draws=%i skipped=%i depthHack weapon=%i model=%i err=0x%04x\n",
 				rb_glesD3Reported3DViews, backEnd.pc.c_drawElements,
 				samples.c_str(),
-				fogLights, blendLights, fogDraws, fogSkips, glGetError() );
+				fogLights, blendLights, fogDraws, fogSkips,
+				weaponHackDraws, modelHackDraws, glGetError() );
 		R_GLESD3_ReportSkipCounts();
 	}
 

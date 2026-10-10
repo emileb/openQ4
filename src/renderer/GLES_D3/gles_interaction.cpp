@@ -207,7 +207,7 @@ static void GLESD3_DrawInteraction( const drawInteraction_t *din ) {
 	}
 
 	float mvp[ 16 ];
-	myGlMultMatrix( surf->space->modelViewMatrix, backEnd.viewDef->projectionMatrix, mvp );
+	R_GLESD3_SpaceMVP( surf->space, mvp );
 
 	R_GLESD3_UseProgram( program );
 	glUniformMatrix4fv( program->uMVP, 1, GL_FALSE, mvp );

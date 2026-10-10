@@ -22,6 +22,21 @@
 
 static GLuint	gles_vao = 0;
 static int		gles_enabledAttributes = 0;
+static bool		gles_weaponDepthRange = false;
+static int		gles_weaponDepthHackDraws = 0;
+static int		gles_modelDepthHackDraws = 0;
+
+/*
+====================
+r_glesD3DepthHack
+
+The weapon and model depth hacks. On by default because that is what every
+other back end does; the switch exists to show what they are for -- with it
+off, the view weapon pokes through any wall the player walks up to.
+====================
+*/
+static idCVar r_glesD3DepthHack( "r_glesD3DepthHack", "1", CVAR_RENDERER | CVAR_BOOL,
+		"gles_d3: apply the weapon/model depth hacks (0 lets the view weapon clip into walls)" );
 
 /*
 ====================
@@ -70,6 +85,10 @@ void R_GLESD3_Draw_BeginView( void ) {
 	idVertexCache::InvalidateBufferBindings();
 	gles_enabledAttributes = 0;
 	R_GLESD3_InvalidateProgramState();
+	glDepthRange( 0.0f, 1.0f );
+	gles_weaponDepthRange = false;
+	gles_weaponDepthHackDraws = 0;
+	gles_modelDepthHackDraws = 0;
 }
 
 void R_GLESD3_Draw_EndView( void ) {
@@ -79,6 +98,59 @@ void R_GLESD3_Draw_EndView( void ) {
 	R_GLESD3_UseProgram( NULL );
 	idVertexCache::InvalidateBufferBindings();
 	gles_enabledAttributes = 0;
+	// a view that ends on the weapon must not leave the next one (or the 2D
+	// pass) squeezed into the front half of the depth range
+	if ( gles_weaponDepthRange ) {
+		glDepthRange( 0.0f, 1.0f );
+		gles_weaponDepthRange = false;
+	}
+}
+
+/*
+====================
+R_GLESD3_SpaceMVP
+
+RB_EnterWeaponDepthHack / RB_EnterModelDepthHack (tr_render.cpp:317, :332),
+which this module excludes, folded into the one place every pass builds a
+surface's MVP. Without it the view weapon is drawn at its true depth, so it
+sinks into any wall the player stands against and its muzzle effects with it.
+
+The weapon hack is two halves and both are needed: the projection's z term is
+scaled so the weapon sits in front of the world, and the depth range is halved
+so it can never be behind it. The range is tracked rather than set per draw,
+because every pass calls this for every surface.
+
+cl_gunfov's weapon-FOV refit is not carried, matching the Vulkan module's
+VK_BuildSurfMVP: it is 0 (follow the view FOV) unless a player sets it.
+====================
+*/
+void R_GLESD3_SpaceMVP( const viewEntity_t *space, float mvp[16] ) {
+	float projection[ 16 ];
+	memcpy( projection, backEnd.viewDef->projectionMatrix, sizeof( projection ) );
+
+	bool weaponRange = false;
+	if ( r_glesD3DepthHack.GetBool() ) {
+		if ( space->modelDepthHack != 0.0f ) {
+			projection[ 14 ] -= space->modelDepthHack;
+			gles_modelDepthHackDraws++;
+		} else if ( space->weaponDepthHack ) {
+			projection[ 14 ] *= 0.25f;
+			weaponRange = true;
+			gles_weaponDepthHackDraws++;
+		}
+	}
+	if ( weaponRange != gles_weaponDepthRange ) {
+		gles_weaponDepthRange = weaponRange;
+		glDepthRange( 0.0f, weaponRange ? 0.5f : 1.0f );
+	}
+
+	myGlMultMatrix( space->modelViewMatrix, projection, mvp );
+}
+
+// MVP builds in the current view that took each hack, for r_glesD3Report
+void R_GLESD3_DepthHackCounts( int &weaponDraws, int &modelDraws ) {
+	weaponDraws = gles_weaponDepthHackDraws;
+	modelDraws = gles_modelDepthHackDraws;
 }
 
 /*
