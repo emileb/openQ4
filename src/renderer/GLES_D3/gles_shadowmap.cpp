@@ -56,6 +56,25 @@ past the cap, smallest on screen first, keep stencil shadows.
 static idCVar r_glesD3ShadowMapMaxLights( "r_glesD3ShadowMapMaxLights", "8", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_INTEGER,
 		"gles_d3: lights per view that get a shadow map with r_useShadowMap 1; the rest keep stencil shadows", 0, 32 );
 
+/*
+====================
+r_glesD3ShadowMapMaxTexel
+
+The coarsest shadow-map texel, in world units at the light's NEAREST
+receiver, that a light may use; coarser lights keep stencil shadows.
+
+Quake 4 fakes outdoor sunlight with enormous point lights whose light_center
+puts the origin thousands of units outside the volume they light --
+game/airdefense1's light_146 is 7392 x 6944 x 3184 with its origin ~4800
+units outside. A 512 cube texel there covers 20-80 units, so the player
+(about 32 wide) and every prop fall below a texel and their shadows vanish,
+while stencil volumes keep them exactly. Raising r_shadowMapPointSize lowers
+the texel and lets such lights back onto maps.
+====================
+*/
+static idCVar r_glesD3ShadowMapMaxTexel( "r_glesD3ShadowMapMaxTexel", "6", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_FLOAT,
+		"gles_d3: lights whose shadow-map texel at the nearest receiver exceeds this many world units keep stencil shadows; 0 disables the check", 0.0f, 1024.0f );
+
 static const int GLESD3_SHADOW_MAX_LIGHTS = 64;
 static const int GLESD3_SHADOW_MAX_SLOTS = 32;
 static const int GLESD3_SHADOW_PASS_LOCAL = 0;
@@ -382,6 +401,27 @@ static int GLESD3_ShadowScissorArea( const viewLight_t *vLight ) {
 		return 0;
 	}
 	return ( r.x2 - r.x1 + 1 ) * ( r.y2 - r.y1 + 1 );
+}
+
+/*
+====================
+GLESD3_ShadowNearestReceiverDistance
+
+Distance from the light origin to its own volume -- zero for an ordinary
+light whose origin is inside it. Every receiver is at least this far away.
+====================
+*/
+static float GLESD3_ShadowNearestReceiverDistance( const viewLight_t *vLight ) {
+	if ( vLight->frustumTris == NULL ) {
+		return 0.0f;
+	}
+	const idBounds &bounds = vLight->frustumTris->bounds;
+	const idVec3 &origin = vLight->globalLightOrigin;
+	idVec3 outside;
+	for ( int i = 0; i < 3; i++ ) {
+		outside[i] = Max( 0.0f, Max( bounds[0][i] - origin[i], origin[i] - bounds[1][i] ) );
+	}
+	return outside.Length();
 }
 
 /*
@@ -724,11 +764,15 @@ void RB_GLESD3_RenderShadowMaps( void ) {
 			continue;
 		}
 
+		// coarsest texel the map would use on any receiver of this light
+		float nearestTexel = 0.0f;
 		if ( light.point ) {
 			light.pointFar = R_ShadowMapPointFarDistance( vLight );
 			if ( !( light.pointFar > GLESD3_POINT_SHADOW_NEAR ) ) {
 				continue;
 			}
+			// a cube face spans 2d at distance d
+			nearestTexel = 2.0f * GLESD3_ShadowNearestReceiverDistance( vLight ) / (float)light.size;
 			const shadowMapPointReceiverSettings_t settings = R_ShadowMapPointReceiverSettings( light.pointFar, light.size );
 			light.bias[0] = settings.constantBias;
 			light.bias[1] = settings.normalBias;
@@ -742,6 +786,7 @@ void RB_GLESD3_RenderShadowMaps( void ) {
 			if ( !light.projected.valid ) {
 				continue;
 			}
+			nearestTexel = light.projected.worldTexelSize[0];
 			const shadowMapProjectedFilterSettings_t filter = R_ShadowMapProjectedFilterSettings( vLight );
 			light.bias[0] = r_shadowMapBias.GetFloat() * light.projected.biasScale[0];
 			light.bias[1] = r_shadowMapNormalBias.GetFloat() * light.projected.biasScale[0];
@@ -750,6 +795,15 @@ void RB_GLESD3_RenderShadowMaps( void ) {
 			light.filter[0] = filter.filterRadius;
 			light.filter[1] = (float)filter.filterTaps;
 			light.filter[3] = 1.0f / (float)light.size;
+		}
+
+		const float maxTexel = r_glesD3ShadowMapMaxTexel.GetFloat();
+		if ( maxTexel > 0.0f && nearestTexel > maxTexel ) {
+			if ( r_glesD3Report.GetInteger() >= 2 ) {
+				common->Printf( "glesd3 shadowmap light '%s' keeps stencil: texel %.1f > r_glesD3ShadowMapMaxTexel %.1f\n",
+						vLight->lightShader->GetName(), nearestTexel, maxTexel );
+			}
+			continue;
 		}
 
 		// slots: one map per representable pass with casters, GLOBAL sharing
@@ -806,6 +860,26 @@ void RB_GLESD3_RenderShadowMaps( void ) {
 	glDisable( GL_POLYGON_OFFSET_FILL );
 	glClearDepthf( 1.0f );
 	gles_shadowCullApplied = -1;
+
+	// r_glesD3Report 2: one line per mapped light, for the views the report
+	// samples -- which lights took maps, of what kind, and at what world-space
+	// resolution, which is what decides whether small casters survive
+	if ( r_glesD3Report.GetInteger() >= 2 ) {
+		for ( int i = 0; i < gles_numShadowLights; i++ ) {
+			const glesShadowLight_t &light = gles_shadowLights[i];
+			const viewLight_t *v = light.vLight;
+			const float texel = light.point
+					? 2.0f * light.pointFar / (float)light.size
+					: light.projected.worldTexelSize[0];
+			common->Printf( "glesd3 shadowmap light '%s' %s size=%i radius=%.0f,%.0f,%.0f far=%.0f "
+					"texel=%.2f bias=%.5f,%.5f,%.5f offset=%.2f slots=%i,%i\n",
+					v->lightShader->GetName(),
+					light.point ? "point" : ( v->parallel ? "parallel" : "projected" ),
+					light.size, v->lightRadius[0], v->lightRadius[1], v->lightRadius[2], light.pointFar,
+					texel, light.bias[0], light.bias[1], light.bias[2], light.bias[3],
+					light.slot[0], light.slot[1] );
+		}
+	}
 
 	for ( int i = 0; i < gles_numShadowLights; i++ ) {
 		glesShadowLight_t &light = gles_shadowLights[i];
