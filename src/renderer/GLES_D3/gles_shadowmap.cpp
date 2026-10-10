@@ -957,8 +957,10 @@ glesProgram_t *RB_GLESD3_ShadowMapBeginPass( const viewLight_t *vLight, bool glo
 	if ( slot < 0 ) {
 		return NULL;
 	}
+	const bool phong = R_GLESD3_PhongSpecular();
 	glesProgram_t *program = R_GLESD3_Program( light->point
-			? GLESD3_PROGRAM_INTERACTION_SHADOW_POINT : GLESD3_PROGRAM_INTERACTION_SHADOW );
+			? ( phong ? GLESD3_PROGRAM_INTERACTION_SHADOW_POINT_PHONG : GLESD3_PROGRAM_INTERACTION_SHADOW_POINT )
+			: ( phong ? GLESD3_PROGRAM_INTERACTION_SHADOW_PHONG : GLESD3_PROGRAM_INTERACTION_SHADOW ) );
 	if ( program == NULL ) {
 		return NULL;
 	}

@@ -46,6 +46,11 @@ uniform vec4 uSpecularColor;
 uniform vec3 uAmbientDir;
 #endif
 
+#ifdef GLESD3_SPECULAR_PHONG
+// x: the broad-Phong exponent (r_glesD3SpecularExponent)
+uniform vec4 uShadingParams;
+#endif
+
 in vec2 vBumpTexCoord;
 in vec2 vDiffuseTexCoord;
 in vec2 vSpecularTexCoord;
@@ -218,9 +223,19 @@ void main() {
     // zero -- compiled out here rather than sampled and multiplied away
     vec3 specular = vec3(0.0);
 #else
+#ifdef GLESD3_SPECULAR_PHONG
+    // r_glesD3SpecularModel 1: diii4a's default harm_r_lightingModel 1 --
+    // pow(R.V, exponent) x2 with a low exponent (3 by default), so the
+    // highlight spreads over most of a lit surface and reads as wet. Not the
+    // stock look; a compiled variant, never a runtime branch.
+    vec3 reflected = -reflect(lightDir, localNormal);
+    float reflectDot = clamp(dot(reflected, SafeNormalize(vViewVector)), 0.0, 1.0);
+    float specularTerm = pow(reflectDot, uShadingParams.x) * 2.0;
+#else
     vec3 halfAngle = SafeNormalize(vHalfAngleVector);
     float specularDot = clamp(dot(halfAngle, localNormal), 0.0, 1.0);
     float specularTerm = texture(uSpecularTableMap, vec2(specularDot, 0.5)).r * 2.0;
+#endif
     vec3 specular = texture(uSpecularMap, vSpecularTexCoord).rgb * uSpecularColor.rgb * specularTerm;
 #endif
 

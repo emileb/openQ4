@@ -581,6 +581,9 @@ void RB_GLESD3_DrawView( void ) {
 		// fill the depth buffer and clear colour to black, except on subviews
 		RB_GLESD3_FillDepthBuffer( drawSurfs, numDrawSurfs );
 
+		// optional diii4a-style fill light, onto the prepass black
+		RB_GLESD3_DrawFillLight( drawSurfs, numDrawSurfs );
+
 		// the main light renderer; D5 adds stencil shadows inside it
 		RB_GLESD3_DrawInteractions();
 

@@ -85,9 +85,23 @@ static const char *GLESD3_BaseDefine( glesD3ProgramId_t id ) {
 	switch ( id ) {
 		case GLESD3_PROGRAM_SHADOW_POINT_CASTER:
 		case GLESD3_PROGRAM_INTERACTION_SHADOW_POINT:
+		case GLESD3_PROGRAM_INTERACTION_SHADOW_POINT_PHONG:
 			return "GLESD3_SHADOW_POINT";
 		case GLESD3_PROGRAM_INTERACTION_SHADOW:
+		case GLESD3_PROGRAM_INTERACTION_SHADOW_PHONG:
 			return "GLESD3_SHADOW_PROJECTED";
+		default:
+			return NULL;
+	}
+}
+
+// a second base define, for programs that combine two specialisations
+static const char *GLESD3_BaseDefine2( glesD3ProgramId_t id ) {
+	switch ( id ) {
+		case GLESD3_PROGRAM_INTERACTION_PHONG:
+		case GLESD3_PROGRAM_INTERACTION_SHADOW_PHONG:
+		case GLESD3_PROGRAM_INTERACTION_SHADOW_POINT_PHONG:
+			return "GLESD3_SPECULAR_PHONG";
 		default:
 			return NULL;
 	}
@@ -222,8 +236,8 @@ static GLuint GLESD3_CompileStage( glesD3ProgramId_t id, GLenum stage, const cha
 	// disk override byte-identical to the embedded source. A program's base
 	// define, if it has one, is spliced the same way first.
 	char *spliced = NULL;
-	const char *defines[ 2 ] = { GLESD3_BaseDefine( id ), variantDefine };
-	for ( int d = 0; d < 2; d++ ) {
+	const char *defines[ 3 ] = { GLESD3_BaseDefine( id ), GLESD3_BaseDefine2( id ), variantDefine };
+	for ( int d = 0; d < 3; d++ ) {
 		if ( defines[ d ] == NULL ) {
 			continue;
 		}
@@ -339,6 +353,7 @@ static void GLESD3_ResolveUniforms( glesProgram_t *program ) {
 	program->uShadowBias = glGetUniformLocation( program->program, "uShadowBias" );
 	program->uShadowFilter = glGetUniformLocation( program->program, "uShadowFilter" );
 	program->uShadowLightOriginFar = glGetUniformLocation( program->program, "uShadowLightOriginFar" );
+	program->uShadingParams = glGetUniformLocation( program->program, "uShadingParams" );
 
 	// The interaction program's samplers are fixed units matching the Vulkan
 	// descriptor sets; bound once at link like uTexture0/1 above.
@@ -410,6 +425,7 @@ static bool GLESD3_BuildProgram( glesD3ProgramId_t id, glesD3ProgramVariant_t va
 	program->uShadowDepthRow = program->uShadowCasterOffset = -1;
 	program->uShadowRow0 = program->uShadowRow1 = program->uShadowRow2 = program->uShadowRow3 = -1;
 	program->uShadowBias = program->uShadowFilter = program->uShadowLightOriginFar = -1;
+	program->uShadingParams = -1;
 
 	const GLuint vertexShader = GLESD3_CompileStage( id, GL_VERTEX_SHADER, programName, variantDefine );
 	const GLuint fragmentShader = GLESD3_CompileStage( id, GL_FRAGMENT_SHADER, programName, variantDefine );

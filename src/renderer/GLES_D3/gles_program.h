@@ -128,6 +128,11 @@ typedef struct glesProgram_s {
 	GLint		uShadowBias;
 	GLint		uShadowFilter;
 	GLint		uShadowLightOriginFar;
+
+	// optional looks (gles_lookoptions in gles_interaction.cpp): x is the
+	// broad-Phong specular exponent in the GLESD3_SPECULAR_PHONG interaction
+	// programs, and the fill brightness in the fill-light program
+	GLint		uShadingParams;
 } glesProgram_t;
 
 typedef enum {
@@ -178,6 +183,14 @@ typedef enum {
 	// define rather than duplicated
 	GLESD3_PROGRAM_INTERACTION_SHADOW,
 	GLESD3_PROGRAM_INTERACTION_SHADOW_POINT,
+	// r_glesD3SpecularModel 1: the same three interaction programs with a broad
+	// Phong highlight compiled in place of the stock _specularTable ramp. A
+	// separate program per combination, so no shader ever branches on it.
+	GLESD3_PROGRAM_INTERACTION_PHONG,
+	GLESD3_PROGRAM_INTERACTION_SHADOW_PHONG,
+	GLESD3_PROGRAM_INTERACTION_SHADOW_POINT_PHONG,
+	// r_glesD3FillLight: a constant-direction fill over every opaque surface
+	GLESD3_PROGRAM_FILL_LIGHT,
 	GLESD3_PROGRAM_COUNT
 } glesD3ProgramId_t;
 

@@ -129,4 +129,9 @@ extern const char * const glesSniperStretch2ShaderFP;
 extern const char * const glesShadowCasterShaderVP;
 extern const char * const glesShadowCasterShaderFP;
 
+// r_glesD3FillLight: a constant-direction fill light over every opaque
+// surface, after diii4a's harm_r_globalIllumination
+extern const char * const glesFillLightShaderVP;
+extern const char * const glesFillLightShaderFP;
+
 #endif /* !__GLES_D3_GLSL_SHADERS_H__ */

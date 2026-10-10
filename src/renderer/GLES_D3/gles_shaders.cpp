@@ -73,7 +73,12 @@ const char *R_GLESD3_EmbeddedShaderSource( glesD3ProgramId_t id, GLenum stage ) 
 			return vertex ? glesShadowCasterShaderVP : glesShadowCasterShaderFP;
 		case GLESD3_PROGRAM_INTERACTION_SHADOW:
 		case GLESD3_PROGRAM_INTERACTION_SHADOW_POINT:
+		case GLESD3_PROGRAM_INTERACTION_PHONG:
+		case GLESD3_PROGRAM_INTERACTION_SHADOW_PHONG:
+		case GLESD3_PROGRAM_INTERACTION_SHADOW_POINT_PHONG:
 			return vertex ? glesInteractionShaderVP : glesInteractionShaderFP;
+		case GLESD3_PROGRAM_FILL_LIGHT:
+			return vertex ? glesFillLightShaderVP : glesFillLightShaderFP;
 		default:
 			return NULL;
 	}
@@ -131,6 +136,14 @@ const char *R_GLESD3_ProgramName( glesD3ProgramId_t id ) {
 			return "gles_d3_interaction_shadow";
 		case GLESD3_PROGRAM_INTERACTION_SHADOW_POINT:
 			return "gles_d3_interaction_shadow_point";
+		case GLESD3_PROGRAM_INTERACTION_PHONG:
+			return "gles_d3_interaction_phong";
+		case GLESD3_PROGRAM_INTERACTION_SHADOW_PHONG:
+			return "gles_d3_interaction_shadow_phong";
+		case GLESD3_PROGRAM_INTERACTION_SHADOW_POINT_PHONG:
+			return "gles_d3_interaction_shadow_point_phong";
+		case GLESD3_PROGRAM_FILL_LIGHT:
+			return "gles_d3_filllight";
 		default:
 			return "unknown";
 	}

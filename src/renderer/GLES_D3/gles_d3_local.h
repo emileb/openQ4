@@ -167,6 +167,10 @@ void	RB_GLESD3_FillDepthBuffer( drawSurf_t **drawSurfs, int numDrawSurfs );
 // depth prepass and the material pass; without it a Quake 4 scene is black,
 // because its surfaces carry no ambient stage.
 void	RB_GLESD3_DrawInteractions( void );
+// r_glesD3SpecularModel 1: the interaction programs to use are the _PHONG ones
+bool	R_GLESD3_PhongSpecular( void );
+// r_glesD3FillLight: the fixed-direction fill, after the depth prepass
+void	RB_GLESD3_DrawFillLight( drawSurf_t **drawSurfs, int numDrawSurfs );
 void	RB_GLESD3_DetermineLightScale( void );
 
 // The two texgen helpers from the excluded draw_common.cpp. Defined in
