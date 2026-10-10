@@ -15,6 +15,9 @@
 #   brightness (no hardware gamma  r_brightness          F10  cycles 1 / 1.25 / 1.5
 #     ramp on ES, so this is now a shader pass)
 #   gamma                          r_gamma               F11  cycles 1 / 1.2 / 1.4
+#   shadow maps (soft, filtered)   r_useShadowMap        HOME
+#     instead of the hard-edged stencil shadows; lights the maps cannot serve
+#     keep stencil, so turning this on never removes a shadow
 #
 # Decals are not on a switch: the material pass used to drop every projected
 # decal outright, and that was a bug, not a look.
@@ -54,8 +57,8 @@ SHOT_DIR="$REPO_ROOT/.tmp/render-shots"
 
 [ -x "$CLIENT" ] || { echo "no client binary at $CLIENT (build first: ninja -C builddir)" >&2; exit 1; }
 
-NEW_CVARS=( r_glesD3GLSLPrograms 1 r_glesD3DepthHack 1 r_brightness 1 r_gamma 1 )
-OLD_CVARS=( r_glesD3GLSLPrograms 0 r_glesD3DepthHack 0 r_brightness 1 r_gamma 1 )
+NEW_CVARS=( r_glesD3GLSLPrograms 1 r_glesD3DepthHack 1 r_brightness 1 r_gamma 1 r_useShadowMap 1 )
+OLD_CVARS=( r_glesD3GLSLPrograms 0 r_glesD3DepthHack 0 r_brightness 1 r_gamma 1 r_useShadowMap 0 )
 
 # --ab scenes: map | setviewpos | console commands before the teleport |
 # settle msec | cvars for the "new" shot on top of NEW_CVARS. Each view was
@@ -84,11 +87,17 @@ scene_spec() {
 			echo "game/hangar1|||1500|r_brightness 1.5" ;;
 		gamma)
 			echo "game/hangar1|||1500|r_gamma 1.4" ;;
+		shadows)
+			# the spawn corridor: the truss ahead darkens under its own map
+			echo "game/hangar1|||1500|" ;;
+		shadows_marine)
+			# an animated character lit by point lights: cube-map casters
+			echo "game/hangar1|-5256 2864 -5819.75 15 -90 0|noclip|1500|" ;;
 		*)
 			return 1 ;;
 	esac
 }
-SCENES="tanks bloodpool bulletholes gun brightness gamma"
+SCENES="tanks bloodpool bulletholes gun brightness gamma shadows shadows_marine"
 
 run_ab() {
 	local scene="$1" spec map viewpos precmds settle extra
@@ -145,7 +154,7 @@ done
 
 LOG="${OPENQ4_LOG:-/tmp/openq4-gles.log}"
 echo "logging to $LOG" >&2
-echo "live keys: F4 GLSL programs  F8 depth hack  F10 brightness  F11 gamma  F9 view position" >&2
+echo "live keys: F4 GLSL programs  F8 depth hack  F10 brightness  F11 gamma  HOME shadow maps  F9 view position" >&2
 
 # r_renderApi and r_renderer are archived; pass both so a stale config cannot
 # redirect the run (see run_glesd3.sh). con_noPrint 0 puts the toggles' echo
@@ -164,6 +173,7 @@ echo "live keys: F4 GLSL programs  F8 depth hack  F10 brightness  F11 gamma  F9 
 	+bind F8 "toggle r_glesD3DepthHack" \
 	+bind F10 "toggle r_brightness 1 1.25 1.5" \
 	+bind F11 "toggle r_gamma 1 1.2 1.4" \
+	+bind HOME "toggle r_useShadowMap" \
 	+bind F9 getviewpos \
 	+set g_autoSkipCinematics 1 \
 	2>&1 | tee "$LOG"
