@@ -113,4 +113,15 @@ extern const char * const glesMonochromeShaderFP;
 extern const char * const glesColorMappingShaderVP;
 extern const char * const glesColorMappingShaderFP;
 
+// Raven's GLSL material programs (glslProgram glsl/*.glsl), ported from the
+// Vulkan material_* shaders. MultiplyBlend and Displacement share a vertex
+// stage; DisplacementCube and SniperStretch2 carry their own.
+extern const char * const glesGlslStageShaderVP;
+extern const char * const glesMultiplyBlendShaderFP;
+extern const char * const glesDisplacementShaderFP;
+extern const char * const glesDisplacementCubeShaderVP;
+extern const char * const glesDisplacementCubeShaderFP;
+extern const char * const glesSniperStretch2ShaderVP;
+extern const char * const glesSniperStretch2ShaderFP;
+
 #endif /* !__GLES_D3_GLSL_SHADERS_H__ */

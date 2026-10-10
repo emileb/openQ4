@@ -471,8 +471,11 @@ void R_ReportShaderPrograms_f( const idCmdArgs &args ) {
 	( void )args;
 }
 
+// gles_d3 draws the four stock Raven GLSL families with its own ports
 bool R_ValidateGLSLProgram( newShaderStage_t *stage ) {
-	( void )stage;
+	if ( RB_GLESD3_Active() ) {
+		return R_GLESD3_ValidateGLSLProgram( stage );
+	}
 	return false;
 }
 

@@ -80,14 +80,25 @@ static void R_ResetSpecularProbeMaterialInfo( specularProbeMaterialInfo_t &info 
 	info.blendFraction = 0.25f;
 }
 
+#ifdef OPENQ4_RENDERER_GLES_MODULE
+// GLES_D3/gles_shaderpasses.cpp
+bool R_GLESD3_MaterialGLSLProgramsAvailable( const idMaterial *material );
+#endif
+
 // `glslPrograms` is an authored material-capability condition, while
 // glConfig.GLSLProgramAvailable also advertises the OpenGL renderer's broad
 // post-processing and modern-feature surface. Vulkan implements the stock
 // material-program families natively without claiming those unrelated paths.
-static bool R_MaterialGLSLProgramsAvailable() {
+// gles_d3 implements the four stock families but not openQ4's own GLSL
+// post-process programs, so it answers per material.
+static bool R_MaterialGLSLProgramsAvailable( const idMaterial *material ) {
 #ifdef OPENQ4_RENDERER_VK_MODULE
+	( void )material;
 	return true;
+#elif defined( OPENQ4_RENDERER_GLES_MODULE )
+	return R_GLESD3_MaterialGLSLProgramsAvailable( material );
 #else
+	( void )material;
 	return glConfig.GLSLProgramAvailable;
 #endif
 }
@@ -4373,7 +4384,7 @@ void idMaterial::EvaluateRegisters( float *registers, const float shaderParms[MA
 			break;
 		case OP_TYPE_GLSL_ENABLED:
 			registers[op->c] =
-					R_MaterialGLSLProgramsAvailable() ? 1.0f : 0.0f;
+					R_MaterialGLSLProgramsAvailable( this ) ? 1.0f : 0.0f;
 			break;
 		case OP_TYPE_GT:
 			registers[op->c] = registers[ op->a ] > registers[op->b];
@@ -4486,7 +4497,7 @@ void idMaterial::EvaluateStageRegisters( int stageIndex, float *registers,
 			break;
 		case OP_TYPE_GLSL_ENABLED:
 			registers[op->c] =
-					R_MaterialGLSLProgramsAvailable() ? 1.0f : 0.0f;
+					R_MaterialGLSLProgramsAvailable( this ) ? 1.0f : 0.0f;
 			break;
 		case OP_TYPE_GT:
 			registers[op->c] = registers[ op->a ] > registers[op->b];

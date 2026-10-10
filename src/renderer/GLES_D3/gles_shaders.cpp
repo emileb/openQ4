@@ -60,6 +60,14 @@ const char *R_GLESD3_EmbeddedShaderSource( glesD3ProgramId_t id, GLenum stage ) 
 			return vertex ? glesMonochromeShaderVP : glesMonochromeShaderFP;
 		case GLESD3_PROGRAM_COLOR_MAPPING:
 			return vertex ? glesColorMappingShaderVP : glesColorMappingShaderFP;
+		case GLESD3_PROGRAM_GLSL_MULTIPLY_BLEND:
+			return vertex ? glesGlslStageShaderVP : glesMultiplyBlendShaderFP;
+		case GLESD3_PROGRAM_GLSL_DISPLACEMENT:
+			return vertex ? glesGlslStageShaderVP : glesDisplacementShaderFP;
+		case GLESD3_PROGRAM_GLSL_DISPLACEMENT_CUBE:
+			return vertex ? glesDisplacementCubeShaderVP : glesDisplacementCubeShaderFP;
+		case GLESD3_PROGRAM_GLSL_SNIPER_STRETCH2:
+			return vertex ? glesSniperStretch2ShaderVP : glesSniperStretch2ShaderFP;
 		default:
 			return NULL;
 	}
@@ -101,6 +109,14 @@ const char *R_GLESD3_ProgramName( glesD3ProgramId_t id ) {
 			return "gles_d3_monochrome";
 		case GLESD3_PROGRAM_COLOR_MAPPING:
 			return "gles_d3_colormapping";
+		case GLESD3_PROGRAM_GLSL_MULTIPLY_BLEND:
+			return "gles_d3_glsl_multiplyblend";
+		case GLESD3_PROGRAM_GLSL_DISPLACEMENT:
+			return "gles_d3_glsl_displacement";
+		case GLESD3_PROGRAM_GLSL_DISPLACEMENT_CUBE:
+			return "gles_d3_glsl_displacementcube";
+		case GLESD3_PROGRAM_GLSL_SNIPER_STRETCH2:
+			return "gles_d3_glsl_sniperstretch2";
 		default:
 			return "unknown";
 	}

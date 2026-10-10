@@ -1287,6 +1287,433 @@ static bool GLESD3_DrawMaterialProgramStage( const drawSurf_t *surf, const shade
 }
 
 /*
+===============================================================================
+	Raven GLSL material programs.
+
+	A `glslProgram glsl/<name>.glsl` stage names one of the four GLSL programs
+	the retail archives ship (glprogs/glsl/*.glslvp/.glslfp). Retail materials
+	pair each with an `if ( glslPrograms == 0 )` fallback stage, and until this
+	existed ES always evaluated glslPrograms to 0, so every one of them drew
+	its fallback:
+
+	  MultiplyBlend     bullet-hole and rocket-burn decals: a darken-only
+	                    smudge instead of a lit, fading impact mark
+	  Displacement      fluid tanks, blood pools, tower glass: no refraction
+	  DisplacementCube  the waste fuzz shields and blood pools: no reflection
+	  SniperStretch2    openQ4's hs/SniperBlur* scope materials, which have NO
+	                    fallback stage and drew nothing at all
+
+	Like the material programs above, each is a hand-written GLSL ES port of
+	the Vulkan module's native implementation, down to the uParms slot
+	numbering, so the two stay diffable.
+
+	glslPrograms is decided PER MATERIAL here, not globally:
+	R_GLESD3_MaterialGLSLProgramsAvailable answers 1 only when every GLSL stage
+	the material has is one this backend can draw. A global answer would flip
+	materials whose GLSL branch needs something ES does not have -- openQ4's own
+	postprocess/blur wants a depth texture -- from a working fallback to
+	nothing.
+===============================================================================
+*/
+
+/*
+====================
+r_glesD3GLSLPrograms
+
+Off makes every material take its glslPrograms == 0 branch again, which is
+what this backend drew before -- the A/B switch for comparing the two looks.
+Evaluated per frame, so it takes effect immediately.
+====================
+*/
+static idCVar r_glesD3GLSLPrograms( "r_glesD3GLSLPrograms", "1", CVAR_RENDERER | CVAR_BOOL,
+		"gles_d3: draw Raven GLSL material programs (0 takes each material's glslPrograms == 0 fallback)" );
+
+typedef enum {
+	GLESD3_GLSL_NONE = 0,
+	GLESD3_GLSL_MULTIPLY_BLEND,
+	GLESD3_GLSL_DISPLACEMENT,
+	GLESD3_GLSL_DISPLACEMENT_CUBE,
+	GLESD3_GLSL_SNIPER_STRETCH2,
+	GLESD3_GLSL_COUNT
+} glesD3GLSLFamily_t;
+
+// uParms slots the renderer fills itself, matching the Vulkan contract
+static const int GLESD3_GLSL_PARM_SLOTS = 16;
+static const int GLESD3_GLSL_SLOT_VIEWPORT_ORIGIN = 13;
+static const int GLESD3_GLSL_SLOT_VIEWPORT_SIZE = 14;
+static const int GLESD3_GLSL_SLOT_CURRENT_RENDER_SCALE = 15;
+
+/*
+====================
+GLESD3_GLSLFamily
+
+Only the canonical `.glsl` names: openQ4's own split-source programs (blur.fs,
+smaa_*.fs) share basenames with nothing here, and must not resolve to a stock
+program's ABI by accident.
+====================
+*/
+static glesD3GLSLFamily_t GLESD3_GLSLFamily( const char *programName ) {
+	if ( programName == NULL || programName[0] == '\0' ) {
+		return GLESD3_GLSL_NONE;
+	}
+	idStr base = programName;
+	idStr extension;
+	base.ExtractFileExtension( extension );
+	if ( extension.Icmp( "glsl" ) != 0 ) {
+		return GLESD3_GLSL_NONE;
+	}
+	base.StripPath();
+	base.StripFileExtension();
+
+	if ( !base.Icmp( "MultiplyBlend" ) ) {
+		return GLESD3_GLSL_MULTIPLY_BLEND;
+	}
+	if ( !base.Icmp( "Displacement" ) ) {
+		return GLESD3_GLSL_DISPLACEMENT;
+	}
+	if ( !base.Icmp( "DisplacementCube" ) ) {
+		return GLESD3_GLSL_DISPLACEMENT_CUBE;
+	}
+	if ( !base.Icmp( "SniperStretch2" ) ) {
+		return GLESD3_GLSL_SNIPER_STRETCH2;
+	}
+	return GLESD3_GLSL_NONE;
+}
+
+static glesD3ProgramId_t GLESD3_GLSLFamilyProgram( glesD3GLSLFamily_t family ) {
+	switch ( family ) {
+		case GLESD3_GLSL_MULTIPLY_BLEND:	return GLESD3_PROGRAM_GLSL_MULTIPLY_BLEND;
+		case GLESD3_GLSL_DISPLACEMENT:		return GLESD3_PROGRAM_GLSL_DISPLACEMENT;
+		case GLESD3_GLSL_DISPLACEMENT_CUBE:	return GLESD3_PROGRAM_GLSL_DISPLACEMENT_CUBE;
+		case GLESD3_GLSL_SNIPER_STRETCH2:	return GLESD3_PROGRAM_GLSL_SNIPER_STRETCH2;
+		default:							return GLESD3_PROGRAM_COUNT;
+	}
+}
+
+// texture units the family's program samples; every one must be supplied
+static unsigned int GLESD3_GLSLRequiredUnits( glesD3GLSLFamily_t family ) {
+	switch ( family ) {
+		case GLESD3_GLSL_MULTIPLY_BLEND:	return 0x01;
+		case GLESD3_GLSL_DISPLACEMENT:		return 0x03;
+		case GLESD3_GLSL_DISPLACEMENT_CUBE:	return 0x07;
+		case GLESD3_GLSL_SNIPER_STRETCH2:	return 0x03;
+		default:							return 0;
+	}
+}
+
+/*
+====================
+GLESD3_GLSLTextureUnit
+
+The unit an authored shaderTexture name binds to, or -1 if the family does
+not sample it. Matches VK_Exec_GLSLTextureSet for these four families.
+====================
+*/
+static int GLESD3_GLSLTextureUnit( glesD3GLSLFamily_t family, const char *name, bool &cube ) {
+	cube = false;
+	if ( name == NULL ) {
+		return -1;
+	}
+	if ( family == GLESD3_GLSL_SNIPER_STRETCH2 ) {
+		if ( !idStr::Icmp( name, "BackgroundImage" ) ) {
+			return 0;
+		}
+		if ( !idStr::Icmp( name, "Scope" ) ) {
+			return 1;
+		}
+		return -1;
+	}
+	if ( !idStr::Icmp( name, "Image" ) ) {
+		return 0;
+	}
+	if ( family == GLESD3_GLSL_MULTIPLY_BLEND ) {
+		return -1;
+	}
+	if ( !idStr::Icmp( name, "DisplacementMap" ) ) {
+		return 1;
+	}
+	if ( family == GLESD3_GLSL_DISPLACEMENT_CUBE && !idStr::Icmp( name, "CubeImage" ) ) {
+		cube = true;
+		return 2;
+	}
+	return -1;
+}
+
+/*
+====================
+GLESD3_GLSLParmSlot
+
+The uParms slot an authored shaderParm name feeds, or -1. Matches
+VK_Exec_GLSLCanonicalParmSlot for these four families.
+====================
+*/
+static int GLESD3_GLSLParmSlot( glesD3GLSLFamily_t family, const char *name ) {
+	static const char * const displacementParms[] = {
+		"scrollX", "scrollY", "sizeX", "sizeY", "texCoordSize"
+	};
+	static const char * const sniperParms[] = {
+		"textureScale", "textureHalfScale", "backgroundColor"
+	};
+	if ( name == NULL ) {
+		return -1;
+	}
+	const char * const *names = NULL;
+	int count = 0;
+	switch ( family ) {
+		case GLESD3_GLSL_DISPLACEMENT_CUBE:
+			if ( !idStr::Icmp( name, "EyeVector" ) ) {
+				return 5;
+			}
+			// fall through: the displacement parms are shared
+		case GLESD3_GLSL_DISPLACEMENT:
+			names = displacementParms;
+			count = sizeof( displacementParms ) / sizeof( displacementParms[0] );
+			break;
+		case GLESD3_GLSL_SNIPER_STRETCH2:
+			names = sniperParms;
+			count = sizeof( sniperParms ) / sizeof( sniperParms[0] );
+			break;
+		default:
+			// MultiplyBlend has no parms; the viewport built-ins are filled
+			// unconditionally, so their authored names need no slot
+			return -1;
+	}
+	for ( int i = 0; i < count; i++ ) {
+		if ( !idStr::Icmp( name, names[i] ) ) {
+			return i;
+		}
+	}
+	return -1;
+}
+
+/*
+====================
+GLESD3_EvaluateGLSLParm
+
+VK_Exec_EvaluateGLSLParm: register expressions, plus the named bindings these
+four programs can be authored with.
+====================
+*/
+static bool GLESD3_EvaluateGLSLParm( const drawSurf_t *surf, const newShaderStage_t *newStage,
+		int slot, float value[4] ) {
+	memset( value, 0, 4 * sizeof( value[0] ) );
+	const float *regs = surf->shaderRegisters;
+	switch ( newStage->shaderParmBindings[ slot ] ) {
+		case GLSL_SHADERPARM_REGISTERS: {
+			const int count = newStage->shaderParmNumRegisters[ slot ];
+			if ( regs == NULL || count <= 0 ) {
+				return false;
+			}
+			for ( int i = 0; i < count && i < 4; i++ ) {
+				value[i] = regs[ newStage->shaderParmRegisters[ slot ][ i ] ];
+			}
+			return true;
+		}
+		case GLSL_SHADERPARM_VIEW_ORIGIN:
+			value[0] = backEnd.viewDef->renderView.vieworg[0];
+			value[1] = backEnd.viewDef->renderView.vieworg[1];
+			value[2] = backEnd.viewDef->renderView.vieworg[2];
+			value[3] = 1.0f;
+			return true;
+		default:
+			return false;
+	}
+}
+
+/*
+====================
+R_GLESD3_ValidateGLSLProgram
+
+R_ValidateGLSLProgram for this backend, cached in the stage's own
+glslProgramLoaded/Valid/Generation fields the way the desktop compiler caches
+its result. glslProgramObject is deliberately left 0: idMaterial::FreeData
+hands any non-zero value to glDeleteObjectARB.
+
+Answers "can this stage be drawn", from the material alone -- not "has the
+program linked". The front end asks before the back end has built any
+programs, and caching a false from that moment would disable the stage for
+the whole session; a link failure is caught and counted at draw time instead.
+====================
+*/
+bool R_GLESD3_ValidateGLSLProgram( newShaderStage_t *stage ) {
+	if ( stage == NULL || !stage->glslProgram || stage->customLighting ) {
+		return false;
+	}
+	if ( stage->glslProgramLoaded && stage->glslProgramGeneration == tr.glContextGeneration ) {
+		return stage->glslProgramValid;
+	}
+
+	const glesD3GLSLFamily_t family = GLESD3_GLSLFamily( stage->glslProgramName );
+	unsigned int suppliedUnits = 0;
+	if ( family != GLESD3_GLSL_NONE ) {
+		for ( int i = 0; i < stage->numShaderTextures; i++ ) {
+			bool cube = false;
+			const int unit = GLESD3_GLSLTextureUnit( family, stage->shaderTextureNames[i], cube );
+			if ( unit >= 0 && stage->shaderTextureImages[i] != NULL ) {
+				suppliedUnits |= 1u << unit;
+			}
+		}
+	}
+	const unsigned int required = GLESD3_GLSLRequiredUnits( family );
+
+	stage->glslProgramLoaded = true;
+	stage->glslProgramValid = ( family != GLESD3_GLSL_NONE )
+			&& ( suppliedUnits & required ) == required;
+	stage->glslProgramGeneration = tr.glContextGeneration;
+	return stage->glslProgramValid;
+}
+
+/*
+====================
+R_GLESD3_MaterialGLSLProgramsAvailable
+
+What the `glslPrograms` material register evaluates to under gles_d3. True
+only when the material has at least one GLSL stage and this backend can draw
+every one of them; a material with no GLSL stage keeps the 0 it always had.
+====================
+*/
+bool R_GLESD3_MaterialGLSLProgramsAvailable( const idMaterial *material ) {
+	if ( material == NULL || !RB_GLESD3_Active()
+			|| !r_glesD3GLSLPrograms.GetBool() || r_glesD3SkipMaterialPrograms.GetBool() ) {
+		return false;
+	}
+	bool anyGLSLStage = false;
+	const int stageCount = material->GetNumStages();
+	for ( int i = 0; i < stageCount; i++ ) {
+		newShaderStage_t *newStage = material->GetStage( i )->newStage;
+		if ( newStage == NULL || !newStage->glslProgram ) {
+			continue;
+		}
+		if ( !R_GLESD3_ValidateGLSLProgram( newStage ) ) {
+			return false;
+		}
+		anyGLSLStage = true;
+	}
+	return anyGLSLStage;
+}
+
+/*
+====================
+GLESD3_DrawGLSLProgramStage
+
+The material-pass draw for one GLSL stage: RB_STD_T_RenderShaderPasses' GLSL
+branch (draw_common.cpp:10550) in the Vulkan module's shape
+(VK_Exec_DrawGLSLProgramStage). Returns false without drawing when anything is
+missing, so the caller counts the stage as skipped rather than drawn.
+====================
+*/
+static bool GLESD3_DrawGLSLProgramStage( const drawSurf_t *surf, const shaderStage_t *pStage,
+		int stageIndex, const float mvp[16], const void *ambientBase ) {
+	newShaderStage_t *newStage = pStage->newStage;
+	if ( !r_glesD3GLSLPrograms.GetBool() || !R_GLESD3_ValidateGLSLProgram( newStage ) ) {
+		return false;
+	}
+	const glesD3GLSLFamily_t family = GLESD3_GLSLFamily( newStage->glslProgramName );
+	const glesProgram_t *program = R_GLESD3_Program( GLESD3_GLSLFamilyProgram( family ) );
+	if ( program == NULL ) {
+		return false;
+	}
+	const float *regs = surf->shaderRegisters;
+
+	float parms[ GLESD3_GLSL_PARM_SLOTS ][ 4 ];
+	memset( parms, 0, sizeof( parms ) );
+	for ( int i = 0; i < newStage->numShaderParms; i++ ) {
+		const int slot = GLESD3_GLSLParmSlot( family, newStage->shaderParmNames[i] );
+		if ( slot < 0 || slot >= GLESD3_GLSL_PARM_SLOTS ) {
+			continue;
+		}
+		GLESD3_EvaluateGLSLParm( surf, newStage, i, parms[ slot ] );
+	}
+
+	// the screen-copy facts, for the SniperStretch2 override contract
+	const int viewportWidth = Max( 1, backEnd.viewDef->viewport.x2 - backEnd.viewDef->viewport.x1 + 1 );
+	const int viewportHeight = Max( 1, backEnd.viewDef->viewport.y2 - backEnd.viewDef->viewport.y1 + 1 );
+	int currentRenderWidth = viewportWidth;
+	int currentRenderHeight = viewportHeight;
+	if ( globalImages->currentRenderImage != NULL ) {
+		currentRenderWidth = Max( 1, globalImages->currentRenderImage->GetOpts().width );
+		currentRenderHeight = Max( 1, globalImages->currentRenderImage->GetOpts().height );
+	}
+	parms[ GLESD3_GLSL_SLOT_VIEWPORT_ORIGIN ][0] = (float)backEnd.viewDef->viewport.x1;
+	parms[ GLESD3_GLSL_SLOT_VIEWPORT_ORIGIN ][1] = (float)backEnd.viewDef->viewport.y1;
+	parms[ GLESD3_GLSL_SLOT_VIEWPORT_SIZE ][0] = (float)viewportWidth;
+	parms[ GLESD3_GLSL_SLOT_VIEWPORT_SIZE ][1] = (float)viewportHeight;
+	parms[ GLESD3_GLSL_SLOT_CURRENT_RENDER_SCALE ][0] = (float)viewportWidth / (float)currentRenderWidth;
+	parms[ GLESD3_GLSL_SLOT_CURRENT_RENDER_SCALE ][1] = (float)viewportHeight / (float)currentRenderHeight;
+
+	// bind every texture before drawing anything, so a missing one fails the
+	// whole stage rather than drawing with whatever a unit last held
+	unsigned int boundUnits = 0;
+	for ( int i = 0; i < newStage->numShaderTextures; i++ ) {
+		bool cube = false;
+		const int unit = GLESD3_GLSLTextureUnit( family, newStage->shaderTextureNames[i], cube );
+		if ( unit < 0 ) {
+			continue;
+		}
+		idImage *image = newStage->shaderTextureImages[i];
+		if ( image == NULL || ( image->GetOpts().textureType == TT_CUBIC ) != cube ) {
+			break;
+		}
+		GL_SelectTexture( unit );
+		image->SetSamplerState( newStage->shaderTextureFilters[i], newStage->shaderTextureRepeats[i] );
+		image->Bind();
+		boundUnits |= 1u << unit;
+	}
+	const unsigned int required = GLESD3_GLSLRequiredUnits( family );
+	const bool drawable = ( boundUnits & required ) == required;
+
+	if ( drawable ) {
+		// gl_Color: the stage colour times the resolved vertex colour, with a
+		// decal's baked per-stage colour standing in for both
+		const bool hasBakedDecalStageColor = ( surf->decalColorCache != NULL
+				&& stageIndex < surf->decalColorStageCount && surf->decalColorStride > 0 );
+		float color[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+		if ( !hasBakedDecalStageColor && regs != NULL ) {
+			for ( int i = 0; i < 4; i++ ) {
+				color[i] = regs[ pStage->color.registers[i] ];
+			}
+		}
+		float vertexColorPacking[4];
+		GLESD3_VertexColorPacking( pStage->vertexColor, vertexColorPacking );
+		if ( pStage->vertexColor != SVC_IGNORE ) {
+			GLESD3_BindStageVertexColor( surf, stageIndex, ambientBase );
+		}
+
+		R_GLESD3_UseProgram( program );
+		glUniformMatrix4fv( program->uMVP, 1, GL_FALSE, mvp );
+		glUniform4fv( program->uColor, 1, color );
+		glUniform4fv( program->uVertexColor, 1, vertexColorPacking );
+		glUniform4fv( program->uParms, GLESD3_GLSL_PARM_SLOTS, &parms[0][0] );
+
+		GL_State( pStage->drawStateBits );
+		R_GLESD3_DrawElements( surf->geo );
+
+		if ( pStage->vertexColor != SVC_IGNORE ) {
+			// a decal stage may have pointed the colour stream elsewhere
+			glVertexAttribPointer( GLESD3_ATTR_COLOR, 4, GL_UNSIGNED_BYTE, GL_TRUE,
+					sizeof( idDrawVert ),
+					RB_DrawVertAttributePointer( ambientBase, offsetof( idDrawVert, color ) ) );
+		}
+	}
+
+	for ( int unit = 2; unit >= 1; unit-- ) {
+		if ( boundUnits & ( 1u << unit ) ) {
+			GL_SelectTexture( unit );
+			globalImages->BindNull();
+		}
+	}
+	GL_SelectTexture( 0 );
+
+	static bool loggedFamily[ GLESD3_GLSL_COUNT ];
+	if ( drawable && !loggedFamily[ family ] ) {
+		loggedFamily[ family ] = true;
+		common->Printf( "gles_d3 GLSL program %s drew first on '%s'\n",
+				newStage->glslProgramName, surf->material->GetName() );
+	}
+	return drawable;
+}
+
+/*
 ====================
 RB_GLESD3_T_RenderShaderPasses
 
@@ -1447,6 +1874,15 @@ static void RB_GLESD3_T_RenderShaderPasses( const drawSurf_t *surf ) {
 			if ( !pStage->newStage->customLighting
 					&& r_skipNewAmbient.GetBool()
 					&& shader->GetSort() < SS_POST_PROCESS ) {
+				continue;
+			}
+
+			if ( pStage->newStage->glslProgram && !pStage->newStage->customLighting ) {
+				if ( !GLESD3_DrawGLSLProgramStage( surf, pStage, stage, mvp, ambientBase ) ) {
+					GLESD3_RecordSkip( GLESD3_SKIP_NEWSTAGE, shader );
+				}
+				// hand the material program its state back, as below
+				R_GLESD3_UseProgram( program );
 				continue;
 			}
 

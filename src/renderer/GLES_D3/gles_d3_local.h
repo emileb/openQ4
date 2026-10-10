@@ -111,6 +111,12 @@ ES is every context. Called at swap from RB_ApplyColorMappingsToBackBuffer.
 */
 void	RB_GLESD3_ApplyColorMappings( void );
 
+// gles_shaderpasses.cpp -- the stock Raven GLSL material programs. Validate
+// answers whether this backend can draw a glslProgram stage; the material
+// variant is what the `glslPrograms` register evaluates to.
+bool	R_GLESD3_ValidateGLSLProgram( newShaderStage_t *stage );
+bool	R_GLESD3_MaterialGLSLProgramsAvailable( const idMaterial *material );
+
 // gles_shaderpasses.cpp -- authored material stages, 2D and GUI.
 // Returns the number of surfaces consumed; stops at the first SS_POST_PROCESS
 // surface that still needs a _currentRender copy.

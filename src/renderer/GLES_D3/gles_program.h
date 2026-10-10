@@ -147,6 +147,12 @@ typedef enum {
 	GLESD3_PROGRAM_MONOCHROME,
 	// r_gamma / r_brightness over the finished back buffer, at swap time
 	GLESD3_PROGRAM_COLOR_MAPPING,
+	// Raven's GLSL material programs: `glslProgram glsl/<name>.glsl` stages,
+	// which retail gates behind `if ( glslPrograms == 1 )`
+	GLESD3_PROGRAM_GLSL_MULTIPLY_BLEND,
+	GLESD3_PROGRAM_GLSL_DISPLACEMENT,
+	GLESD3_PROGRAM_GLSL_DISPLACEMENT_CUBE,
+	GLESD3_PROGRAM_GLSL_SNIPER_STRETCH2,
 	GLESD3_PROGRAM_COUNT
 } glesD3ProgramId_t;
 
