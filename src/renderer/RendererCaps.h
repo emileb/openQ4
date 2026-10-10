@@ -89,6 +89,9 @@ typedef struct renderBackendCaps_s {
 	bool						hasMapBufferRange;
 	bool						hasBufferStorage;
 	bool						hasDSA;
+	// GL_EXT_direct_state_access, probed once: idImage::Bind asks on every
+	// bind, and an extension-string scan there cost ~10% of a frame on ES
+	bool						hasEXTDirectStateAccess;
 	bool						hasMultiBind;
 	bool						hasCompute;
 	bool						hasSSBO;

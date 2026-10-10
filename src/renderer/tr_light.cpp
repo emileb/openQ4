@@ -1168,8 +1168,12 @@ bool R_LinkLightSurf( const drawSurf_t **link, const srfTriangles_t *tri, const 
 		// shared with the ambient pass through the per-view register memo
 		drawSurf->shaderRegisters = R_SetupDrawSurfShaderRegisters( space, NULL, shader );
 
-		// calculate the specular coordinates if we aren't using vertex programs
-		if ( !tr.backEndRendererHasVertexPrograms && !r_skipSpecular.GetBool()  ) {
+		// calculate the specular coordinates if we aren't using vertex programs;
+		// gles_d3 has no ARB vertex programs but its interaction shader derives
+		// the half-angle itself and never reads these, and generating them for
+		// every lit surface every frame cost ~5% of a frame on a phone
+		if ( !tr.backEndRendererHasVertexPrograms && tr.backEndRenderer != BE_GLES_D3
+				&& !r_skipSpecular.GetBool() ) {
 			R_SpecularTexGen( drawSurf, light->globalLightOrigin, tr.viewDef->renderView.vieworg );
 			// if we failed to allocate space for the specular calculations, drop the surface
 			if ( !drawSurf->dynamicTexCoords ) {
