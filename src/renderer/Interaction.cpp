@@ -150,6 +150,18 @@ retain the optimized prelight behavior.
 */
 bool R_ShadowMapsNeedPerSurfaceStencilVolumes(
 		const idRenderLightLocal *lightDef ) {
+#ifdef OPENQ4_RENDERER_GLES_MODULE
+	// gles_d3 never stamps a partial map's missing casters into stencil: a
+	// pass whose map is incomplete falls back to the light's FULL stencil
+	// shadows, which the combined prelight volume serves exactly as it does
+	// with maps off (R_AddOptimizedPrelightShadows still raises
+	// shadowMapIncompleteMapMask for every prelight caster the map lacks).
+	// Keeping the prelight saves building a CPU stencil volume for every
+	// static-world surface of every light as it is first met -- the cost a
+	// phone pays on level start and on entering a new area.
+	( void )lightDef;
+	return false;
+#endif
 	if ( lightDef == NULL || !r_shadows.GetBool() ||
 		!r_useShadowMap.GetBool() ) {
 		return false;
@@ -527,7 +539,19 @@ static bool R_EnsureShadowMapCasterCaches( srfTriangles_t *casterTris, const idR
 }
 
 static bool R_ShadowMapConservativeCastersEnabled( void ) {
+#ifdef OPENQ4_RENDERER_GLES_MODULE
+	// Conservative casters create extra caster-only interactions for surfaces
+	// whose own receivers are off screen. gles_d3 does not need them: a caster
+	// missing from a map marks that receiver pass incomplete, and the pass then
+	// draws with the light's full stencil shadows, whose volumes already cover
+	// off-screen casters. Measured on game/airdefense1 they were the whole of
+	// the shadow-map CPU overhead -- 21736 interactions created vs 12219 with
+	// maps off, 12108 with this off -- with shadows unchanged within the
+	// level's own run-to-run noise.
+	return false;
+#else
 	return r_useShadowMap.GetBool() && r_shadowMapConservativeCasters.GetBool();
+#endif
 }
 
 static bool R_ShadowMapEntityTouchesConnectedArea( const idRenderEntityLocal *entityDef ) {
