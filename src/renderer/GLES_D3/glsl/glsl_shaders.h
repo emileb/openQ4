@@ -124,4 +124,9 @@ extern const char * const glesDisplacementCubeShaderFP;
 extern const char * const glesSniperStretch2ShaderVP;
 extern const char * const glesSniperStretch2ShaderFP;
 
+// shadow-map casters, from Vulkan/shaders/shadow_caster.* and
+// shadow_point_caster.* in one source split by GLESD3_SHADOW_POINT
+extern const char * const glesShadowCasterShaderVP;
+extern const char * const glesShadowCasterShaderFP;
+
 #endif /* !__GLES_D3_GLSL_SHADERS_H__ */

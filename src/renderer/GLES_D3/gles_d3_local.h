@@ -176,6 +176,24 @@ void	R_GLESD3_BakeTextureMatrixIntoTexgen( idPlane lightProject[3], const float 
 void	R_GLESD3_GetShaderTextureMatrix( const float *shaderRegisters,
 				const textureStage_t *texture, float matrix[16] );
 
+// gles_shadowmap.cpp -- shadow maps, opt-in with r_useShadowMap. Stencil
+// volumes are still built for every light, so a pass the maps cannot serve
+// falls back to stencil within the same view.
+typedef enum {
+	GLESD3_SHADOWPASS_STENCIL = 0,	// not mapped: the stencil volumes shadow it
+	GLESD3_SHADOWPASS_MAP,			// sample this view's shadow map
+	GLESD3_SHADOWPASS_UNSHADOWED	// mapped light, but the pass has no casters
+} glesD3ShadowPassMode_t;
+
+void	RB_GLESD3_RenderShadowMaps( void );
+void	RB_GLESD3_ShutdownShadowMaps( void );
+glesD3ShadowPassMode_t	RB_GLESD3_ShadowMapPassMode( const viewLight_t *vLight, bool globalPass );
+struct glesProgram_s *	RB_GLESD3_ShadowMapBeginPass( const viewLight_t *vLight, bool globalPass );
+void	RB_GLESD3_ShadowMapEndPass( void );
+void	RB_GLESD3_ShadowMapCountStencilPass( void );
+void	RB_GLESD3_ShadowMapSetReceiverUniforms( const struct glesProgram_s *program, const drawSurf_t *surf );
+void	RB_GLESD3_ShadowMapReport( int &mappedLights, int &pointLights, int &mappedPasses, int &stencilPasses, int &casterDraws );
+
 // gles_fog.cpp -- fog volumes and blend lights, the last two Doom 3 core
 // passes. Runs between the two material walks, where RB_STD_DrawView puts it.
 void	RB_GLESD3_FogAllLights( void );

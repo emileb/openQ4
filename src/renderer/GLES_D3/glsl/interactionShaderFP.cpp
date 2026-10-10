@@ -58,6 +58,112 @@ in vec3 vViewVector;
 
 out vec4 outColor;
 
+// Shadow-map receivers, from Vulkan/shaders/interaction_shadow.frag and
+// interaction_shadow_point.frag, reduced to one cascade and fixed PCF:
+//   uShadowBias    x constant, y normal (sin theta) bias, z texel depth bias,
+//                  w normal offset (consumed by the vertex stage)
+//   uShadowFilter  x PCF radius in texels, y taps (1/5/9/13), w texel step
+//                  (1 / map size projected, 2 / face size point)
+// Samplers need an explicit precision in GLSL ES: shadow samplers have no
+// default, and a mediump compare is too coarse for depth.
+#if defined(GLESD3_SHADOW_PROJECTED) || defined(GLESD3_SHADOW_POINT)
+uniform vec4 uShadowBias;
+uniform vec4 uShadowFilter;
+in float vShadowLightCos;
+
+const vec2 kShadowPoisson[12] = vec2[12](
+    vec2(-0.326212, -0.405805), vec2(-0.840144, -0.073580),
+    vec2(-0.695914, 0.457137), vec2(-0.203345, 0.620716),
+    vec2(0.962340, -0.194983), vec2(0.473434, -0.480026),
+    vec2(0.519456, 0.767022), vec2(0.185461, -0.893124),
+    vec2(0.507431, 0.064425), vec2(0.896420, 0.412458),
+    vec2(-0.321940, -0.932615), vec2(-0.791559, -0.597705));
+
+float ShadowReceiverBias() {
+    float lightCos = clamp(vShadowLightCos, 0.20, 1.0);
+    float sinTheta = sqrt(max(1.0 - lightCos * lightCos, 0.0));
+    float slopeBias = min(sinTheta / lightCos, 4.0);
+    float scalarBias = uShadowBias.x + uShadowBias.y * sinTheta;
+    float texelBias = uShadowBias.z * (1.0 + slopeBias);
+    return max(max(scalarBias, 0.0), max(texelBias, 0.0));
+}
+
+int ShadowExtraTaps() {
+    // 1, 5, 9 or 13 taps: the centre plus 0, 4, 8 or 12 Poisson offsets
+    return uShadowFilter.y <= 1.0 ? 0 : (uShadowFilter.y <= 5.0 ? 4 : (uShadowFilter.y <= 9.0 ? 8 : 12));
+}
+#endif
+
+#ifdef GLESD3_SHADOW_PROJECTED
+uniform highp sampler2DShadow uShadowMap;
+in vec4 vShadowCoord;
+
+float SampleShadowFactor() {
+    float w = vShadowCoord.w;
+    // !(w > eps) also rejects NaN; behind the projector is lit
+    if (!(w > 1.0e-5) || w > 65536.0) {
+        return 1.0;
+    }
+    vec2 uv = vShadowCoord.xy / w * 0.5 + 0.5;
+    float depth = vShadowCoord.z;
+    if (uv.x <= 0.0 || uv.x >= 1.0 || uv.y <= 0.0 || uv.y >= 1.0
+            || depth <= 0.0 || depth >= 1.0) {
+        return 1.0;
+    }
+    float compareDepth = depth - ShadowReceiverBias();
+    vec2 guard = vec2(uShadowFilter.w * max(0.5, uShadowFilter.x + 0.75));
+    vec2 clampMin = guard;
+    vec2 clampMax = vec2(1.0) - guard;
+    uv = clamp(uv, clampMin, clampMax);
+
+    float result = texture(uShadowMap, vec3(uv, compareDepth));
+    int extra = ShadowExtraTaps();
+    if (uShadowFilter.x <= 0.0 || extra == 0) {
+        return result;
+    }
+    vec2 tap = vec2(uShadowFilter.w * uShadowFilter.x);
+    for (int i = 0; i < extra; i++) {
+        result += texture(uShadowMap, vec3(clamp(uv + kShadowPoisson[i] * tap, clampMin, clampMax), compareDepth));
+    }
+    return result / float(extra + 1);
+}
+#endif
+
+#ifdef GLESD3_SHADOW_POINT
+uniform highp samplerCubeShadow uShadowMap;
+uniform vec4 uShadowLightOriginFar;
+in vec3 vPointShadowVector;
+
+float SampleShadowFactor() {
+    float far = uShadowLightOriginFar.w;
+    if (!(far > 0.0)) {
+        return 1.0;
+    }
+    float depth = length(vPointShadowVector) / far;
+    if (depth <= 0.0 || depth >= 1.0) {
+        return 1.0;
+    }
+    float compareDepth = depth - ShadowReceiverBias();
+    vec3 direction = vPointShadowVector * inversesqrt(max(dot(vPointShadowVector, vPointShadowVector), 1.0e-8));
+
+    float result = texture(uShadowMap, vec4(direction, compareDepth));
+    int extra = ShadowExtraTaps();
+    if (uShadowFilter.x <= 0.0 || extra == 0) {
+        return result;
+    }
+    // offsets in the plane perpendicular to the lookup, scaled to cube texels
+    vec3 up = abs(direction.z) < 0.99 ? vec3(0.0, 0.0, 1.0) : vec3(0.0, 1.0, 0.0);
+    vec3 tangent = normalize(cross(up, direction));
+    vec3 bitangent = cross(direction, tangent);
+    float tap = uShadowFilter.w * uShadowFilter.x;
+    for (int i = 0; i < extra; i++) {
+        vec2 o = kShadowPoisson[i];
+        result += texture(uShadowMap, vec4(normalize(direction + (tangent * o.x + bitangent * o.y) * tap), compareDepth));
+    }
+    return result / float(extra + 1);
+}
+#endif
+
 vec3 SafeNormalize(vec3 value) {
     return value * inversesqrt(max(dot(value, value), 1.0e-8));
 }
@@ -99,6 +205,10 @@ void main() {
     vec3 light = vec3(ndotl);
     light *= textureProj(uLightFalloffMap, vLightFalloffTexCoord).rgb;
     light *= textureProj(uLightProjectionMap, vLightProjectionTexCoord).rgb;
+#if defined(GLESD3_SHADOW_PROJECTED) || defined(GLESD3_SHADOW_POINT)
+    // scales diffuse and specular alike, as in Vulkan and ARB2
+    light *= SampleShadowFactor();
+#endif
 
     vec3 diffuse = texture(uDiffuseMap, vDiffuseTexCoord).rgb * uDiffuseColor.rgb;
 

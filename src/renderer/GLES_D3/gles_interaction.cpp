@@ -47,6 +47,9 @@ static glesProgram_t *	gles_interactionProgram = NULL;
 // the common per-light fragment path carries no branch (gles_program.h, D8).
 static glesProgram_t *	gles_interactionAmbientProgram = NULL;
 static float			gles_ambientDir[ 3 ] = { 1.0f, 0.0f, 0.0f };
+// the shadow-map receiver program while a mapped pass is drawing, else NULL;
+// ambient lights never take one (gles_shadowmap.cpp rejects them)
+static glesProgram_t *	gles_shadowReceiverProgram = NULL;
 static int				gles_interactionDraws = 0;
 static bool				gles_reportedLights = false;
 
@@ -189,7 +192,8 @@ static void GLESD3_DrawInteraction( const drawInteraction_t *din ) {
 	const drawSurf_t *surf = din->surf;
 	const srfTriangles_t *tri = surf->geo;
 	glesProgram_t *program = din->ambientLight
-			? gles_interactionAmbientProgram : gles_interactionProgram;
+			? gles_interactionAmbientProgram
+			: ( gles_shadowReceiverProgram != NULL ? gles_shadowReceiverProgram : gles_interactionProgram );
 
 	// tri->indexCache may legitimately be NULL here: R_CreateAmbientCache
 	// (tr_light.cpp:242) allocates VERTICES ONLY, so a light's generated
@@ -229,6 +233,10 @@ static void GLESD3_DrawInteraction( const drawInteraction_t *din ) {
 
 	// only the ambient variant declares uAmbientDir; -1 no-ops on the base
 	glUniform3fv( program->uAmbientDir, 1, gles_ambientDir );
+
+	if ( program == gles_shadowReceiverProgram ) {
+		RB_GLESD3_ShadowMapSetReceiverUniforms( program, surf );
+	}
 
 	// the (rgbModulate, rgbAdd, alphaModulate, alphaAdd) SVC packing, shared
 	// with the material program. The interaction shader consumes only the RGB
@@ -464,6 +472,32 @@ static void GLESD3_DrawInteractionChain( const drawSurf_t *chain, int depthFunc 
 
 /*
 ====================
+GLESD3_DrawShadowMappedChain
+
+A receiver chain lit through a shadow map instead of the stencil test: the
+stencil test is opened, the pass's map is bound, and every interaction draws
+with the shadowed program. UNSHADOWED passes (a mapped light with no casters
+for this receiver class) draw with the ordinary program and no test.
+====================
+*/
+static void GLESD3_DrawShadowMappedChain( const viewLight_t *vLight, const drawSurf_t *chain,
+		bool globalPass, glesD3ShadowPassMode_t mode, int depthFunc = GLS_DEPTHFUNC_EQUAL ) {
+	if ( chain == NULL ) {
+		return;
+	}
+	glStencilFunc( GL_ALWAYS, 128, 255 );
+	if ( mode == GLESD3_SHADOWPASS_MAP ) {
+		gles_shadowReceiverProgram = RB_GLESD3_ShadowMapBeginPass( vLight, globalPass );
+	}
+	GLESD3_DrawInteractionChain( chain, depthFunc );
+	if ( gles_shadowReceiverProgram != NULL ) {
+		RB_GLESD3_ShadowMapEndPass();
+		gles_shadowReceiverProgram = NULL;
+	}
+}
+
+/*
+====================
 RB_GLESD3_DetermineLightScale
 
 RB_DetermineLightScale (tr_render.cpp:675). tr.backEndRendererMaxLight is 999
@@ -561,6 +595,66 @@ void RB_GLESD3_DrawInteractions( void ) {
 		const int drawsBeforeLight = gles_interactionDraws;
 
 		const bool hasShadows = ( vLight->globalShadows != NULL || vLight->localShadows != NULL );
+
+		// r_useShadowMap: each receiver pass is shadowed by this view's map, or
+		// falls back to the stencil volumes below, which are always built
+		const glesD3ShadowPassMode_t localMode = RB_GLESD3_ShadowMapPassMode( vLight, false );
+		const glesD3ShadowPassMode_t globalMode = RB_GLESD3_ShadowMapPassMode( vLight, true );
+		if ( localMode != GLESD3_SHADOWPASS_STENCIL || globalMode != GLESD3_SHADOWPASS_STENCIL ) {
+			if ( localMode == GLESD3_SHADOWPASS_STENCIL ) {
+				RB_GLESD3_ShadowMapCountStencilPass();
+			}
+			if ( globalMode == GLESD3_SHADOWPASS_STENCIL ) {
+				RB_GLESD3_ShadowMapCountStencilPass();
+			}
+			const bool anyStencil = hasShadows
+					&& ( localMode == GLESD3_SHADOWPASS_STENCIL || globalMode == GLESD3_SHADOWPASS_STENCIL );
+			if ( anyStencil && RB_GLESD3_SetScissor( vLight->scissorRect ) ) {
+				glClear( GL_STENCIL_BUFFER_BIT );
+			}
+
+			// local receivers: shadowed by the global casters only
+			if ( localMode == GLESD3_SHADOWPASS_STENCIL ) {
+				if ( hasShadows ) {
+					RB_GLESD3_StencilShadowPass( vLight->globalShadows );
+				} else {
+					glStencilFunc( GL_ALWAYS, 128, 255 );
+				}
+				GLESD3_DrawInteractionChain( vLight->localInteractions );
+			} else {
+				GLESD3_DrawShadowMappedChain( vLight, vLight->localInteractions, false, localMode );
+			}
+
+			// global receivers: shadowed by everything. On the stencil side the
+			// global volumes go in first unless the local pass already put them
+			// there.
+			if ( globalMode == GLESD3_SHADOWPASS_STENCIL ) {
+				if ( hasShadows ) {
+					if ( localMode != GLESD3_SHADOWPASS_STENCIL ) {
+						RB_GLESD3_StencilShadowPass( vLight->globalShadows );
+					}
+					RB_GLESD3_StencilShadowPass( vLight->localShadows );
+				} else {
+					glStencilFunc( GL_ALWAYS, 128, 255 );
+				}
+				GLESD3_DrawInteractionChain( vLight->globalInteractions );
+			} else {
+				GLESD3_DrawShadowMappedChain( vLight, vLight->globalInteractions, true, globalMode );
+			}
+
+			if ( !r_skipTranslucent.GetBool() ) {
+				if ( globalMode != GLESD3_SHADOWPASS_STENCIL && r_shadowMapTranslucentReceivers.GetBool() ) {
+					GLESD3_DrawShadowMappedChain( vLight, vLight->translucentInteractions, true, globalMode,
+							GLS_DEPTHFUNC_LESS );
+				} else {
+					const bool shadowTranslucent = r_stencilTranslucentShadows.GetBool() && r_shadows.GetBool()
+							&& hasShadows && globalMode == GLESD3_SHADOWPASS_STENCIL;
+					glStencilFunc( shadowTranslucent ? GL_GEQUAL : GL_ALWAYS, 128, 255 );
+					GLESD3_DrawInteractionChain( vLight->translucentInteractions, GLS_DEPTHFUNC_LESS );
+				}
+			}
+			continue;
+		}
 
 		if ( hasShadows ) {
 			// Every light starts from a clean stencil. Without this the volumes

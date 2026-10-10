@@ -68,6 +68,12 @@ const char *R_GLESD3_EmbeddedShaderSource( glesD3ProgramId_t id, GLenum stage ) 
 			return vertex ? glesDisplacementCubeShaderVP : glesDisplacementCubeShaderFP;
 		case GLESD3_PROGRAM_GLSL_SNIPER_STRETCH2:
 			return vertex ? glesSniperStretch2ShaderVP : glesSniperStretch2ShaderFP;
+		case GLESD3_PROGRAM_SHADOW_CASTER:
+		case GLESD3_PROGRAM_SHADOW_POINT_CASTER:
+			return vertex ? glesShadowCasterShaderVP : glesShadowCasterShaderFP;
+		case GLESD3_PROGRAM_INTERACTION_SHADOW:
+		case GLESD3_PROGRAM_INTERACTION_SHADOW_POINT:
+			return vertex ? glesInteractionShaderVP : glesInteractionShaderFP;
 		default:
 			return NULL;
 	}
@@ -117,6 +123,14 @@ const char *R_GLESD3_ProgramName( glesD3ProgramId_t id ) {
 			return "gles_d3_glsl_displacementcube";
 		case GLESD3_PROGRAM_GLSL_SNIPER_STRETCH2:
 			return "gles_d3_glsl_sniperstretch2";
+		case GLESD3_PROGRAM_SHADOW_CASTER:
+			return "gles_d3_shadowcaster";
+		case GLESD3_PROGRAM_SHADOW_POINT_CASTER:
+			return "gles_d3_shadowcaster_point";
+		case GLESD3_PROGRAM_INTERACTION_SHADOW:
+			return "gles_d3_interaction_shadow";
+		case GLESD3_PROGRAM_INTERACTION_SHADOW_POINT:
+			return "gles_d3_interaction_shadow_point";
 		default:
 			return "unknown";
 	}

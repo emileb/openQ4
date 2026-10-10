@@ -507,6 +507,13 @@ void RB_GLESD3_DrawView( void ) {
 
 	backEnd.depthFunc = GLS_DEPTHFUNC_EQUAL;
 
+	// Shadow maps first, before the scene target is cleared or drawn into, so
+	// a tiled GPU leaves it once per view instead of once per light. Inert
+	// unless r_useShadowMap is set.
+	if ( backEnd.viewDef->viewEntitys != NULL && RB_GLESD3_EnsureResources() ) {
+		RB_GLESD3_RenderShadowMaps();
+	}
+
 	RB_GLESD3_BeginTargetScale();
 	RB_GLESD3_BeginDrawingView();
 
@@ -623,12 +630,16 @@ void RB_GLESD3_DrawView( void ) {
 		RB_GLESD3_FogBlendCounts( fogLights, blendLights, fogDraws, fogSkips );
 		int weaponHackDraws = 0, modelHackDraws = 0;
 		R_GLESD3_DepthHackCounts( weaponHackDraws, modelHackDraws );
+		int shadowLights = 0, shadowPoint = 0, shadowMapped = 0, shadowStencil = 0, shadowCasters = 0;
+		RB_GLESD3_ShadowMapReport( shadowLights, shadowPoint, shadowMapped, shadowStencil, shadowCasters );
 		common->Printf( "glesd3 afterMaterial(view %i): drawElements=%i px[ %s] "
-				"fog=%i/%i draws=%i skipped=%i depthHack weapon=%i model=%i err=0x%04x\n",
+				"fog=%i/%i draws=%i skipped=%i depthHack weapon=%i model=%i "
+				"shadowMaps lights=%i point=%i mappedPasses=%i stencilPasses=%i casterDraws=%i err=0x%04x\n",
 				rb_glesD3Reported3DViews, backEnd.pc.c_drawElements,
 				samples.c_str(),
 				fogLights, blendLights, fogDraws, fogSkips,
-				weaponHackDraws, modelHackDraws, glGetError() );
+				weaponHackDraws, modelHackDraws,
+				shadowLights, shadowPoint, shadowMapped, shadowStencil, shadowCasters, glGetError() );
 		R_GLESD3_ReportSkipCounts();
 	}
 

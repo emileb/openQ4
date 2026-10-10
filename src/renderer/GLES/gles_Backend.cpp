@@ -528,7 +528,10 @@ bool RB_ShadowMapTextureBindings( rendererShadowTextureBindings_t &bindings ) {
 }
 
 void RB_ShutdownScenePostProcess( void ) { }
-void RB_ShutdownShadowMapResources( void ) { }
+// gles_d3's own maps; harmless when none were ever created
+void RB_ShutdownShadowMapResources( void ) {
+	RB_GLESD3_ShutdownShadowMaps();
+}
 
 void RB_ResetARB2InteractionHandoffBreadcrumb( void ) { }
 

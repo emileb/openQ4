@@ -113,6 +113,21 @@ typedef struct glesProgram_s {
 	// shader sets stay diffable -- the ports were made from each other and the
 	// slot numbering is the shared contract.
 	GLint		uParms;
+
+	// shadow maps (gles_shadowmap.cpp). Casters: the light-space depth row and
+	// the caster depth offset. Receivers: the light clip rows localized to the
+	// surface (projected) or the light origin and far envelope (point), plus
+	// bias and PCF parameters. The map itself is uShadowMap on unit 6, bound
+	// at link like the other samplers.
+	GLint		uShadowDepthRow;
+	GLint		uShadowCasterOffset;
+	GLint		uShadowRow0;
+	GLint		uShadowRow1;
+	GLint		uShadowRow2;
+	GLint		uShadowRow3;
+	GLint		uShadowBias;
+	GLint		uShadowFilter;
+	GLint		uShadowLightOriginFar;
 } glesProgram_t;
 
 typedef enum {
@@ -153,6 +168,16 @@ typedef enum {
 	GLESD3_PROGRAM_GLSL_DISPLACEMENT,
 	GLESD3_PROGRAM_GLSL_DISPLACEMENT_CUBE,
 	GLESD3_PROGRAM_GLSL_SNIPER_STRETCH2,
+	// shadow-map casters: linear light depth written from the fragment stage,
+	// projected (falloff-plane depth) and point (radial distance) flavours of
+	// one source, each with an ALPHATEST variant for perforated casters
+	GLESD3_PROGRAM_SHADOW_CASTER,
+	GLESD3_PROGRAM_SHADOW_POINT_CASTER,
+	// the interaction program with the shadow-map lookup compiled in --
+	// the same source as GLESD3_PROGRAM_INTERACTION, specialised by a base
+	// define rather than duplicated
+	GLESD3_PROGRAM_INTERACTION_SHADOW,
+	GLESD3_PROGRAM_INTERACTION_SHADOW_POINT,
 	GLESD3_PROGRAM_COUNT
 } glesD3ProgramId_t;
 
