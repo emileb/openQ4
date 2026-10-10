@@ -637,7 +637,11 @@ static void RB_GLESD3_T_FillDepthBuffer( const drawSurf_t *surf, glesProgram_t *
 	if ( shader->Coverage() == MC_TRANSLUCENT ) {
 		return;
 	}
-	if ( tri->ambientCache == NULL || tri->indexCache == NULL ) {
+	// No index cache is fine as long as there are CPU indexes:
+	// R_GLESD3_DrawElements uploads them to a frame temp. Requiring the cache
+	// here dropped every projected decal -- ModelDecal builds them with CPU
+	// indexes only -- so bullet holes and scorch marks never appeared.
+	if ( tri->ambientCache == NULL || ( tri->indexCache == NULL && tri->indexes == NULL ) ) {
 		GLESD3_RecordSkip( GLESD3_SKIP_NO_GEOMETRY, shader );
 		return;
 	}
@@ -1323,7 +1327,8 @@ static void RB_GLESD3_T_RenderShaderPasses( const drawSurf_t *surf ) {
 		// some deforms disable themselves by setting numIndexes to 0
 		return;
 	}
-	if ( tri->ambientCache == NULL || tri->indexCache == NULL ) {
+	// see RB_GLESD3_T_FillDepthBuffer: CPU indexes are enough
+	if ( tri->ambientCache == NULL || ( tri->indexCache == NULL && tri->indexes == NULL ) ) {
 		GLESD3_RecordSkip( GLESD3_SKIP_NO_GEOMETRY, shader );
 		return;
 	}
