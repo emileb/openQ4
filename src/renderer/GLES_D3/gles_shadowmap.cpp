@@ -115,6 +115,26 @@ static const viewDef_t *	gles_shadowViewDef = NULL;
 // the receiver pass the interaction chain is in, set by RB_GLESD3_ShadowMapBeginPass
 static const glesShadowLight_t *	gles_activeShadowLight = NULL;
 
+/*
+====================
+GLESD3_ShadowReportThisView
+
+The r_glesD3Report 2 per-light lines, for the first few views after the
+report is (re)armed only -- printed every view they flood the log at frame
+rate, which on a phone means logcat.
+====================
+*/
+static bool GLESD3_ShadowReportThisView( void ) {
+	static int armedValue = 0;
+	static int reportedViews = 0;
+	const int value = r_glesD3Report.GetInteger();
+	if ( value != armedValue ) {
+		armedValue = value;
+		reportedViews = 0;
+	}
+	return value >= 2 && reportedViews++ < 4;
+}
+
 // r_glesD3Report counters for the current view
 static int gles_shadowMappedPasses = 0;
 static int gles_shadowStencilPasses = 0;
@@ -736,6 +756,7 @@ void RB_GLESD3_RenderShadowMaps( void ) {
 		candidates[j + 1] = v;
 	}
 
+	const bool reportLights = GLESD3_ShadowReportThisView();
 	const int projectedSize = idMath::ClampInt( 128, 4096, r_shadowMapSize.GetInteger() );
 	const int pointSize = idMath::ClampInt( 128, 2048, r_shadowMapPointSize.GetInteger() );
 	int used2D = 0;
@@ -799,7 +820,7 @@ void RB_GLESD3_RenderShadowMaps( void ) {
 
 		const float maxTexel = r_glesD3ShadowMapMaxTexel.GetFloat();
 		if ( maxTexel > 0.0f && nearestTexel > maxTexel ) {
-			if ( r_glesD3Report.GetInteger() >= 2 ) {
+			if ( reportLights ) {
 				common->Printf( "glesd3 shadowmap light '%s' keeps stencil: texel %.1f > r_glesD3ShadowMapMaxTexel %.1f\n",
 						vLight->lightShader->GetName(), nearestTexel, maxTexel );
 			}
@@ -864,7 +885,7 @@ void RB_GLESD3_RenderShadowMaps( void ) {
 	// r_glesD3Report 2: one line per mapped light, for the views the report
 	// samples -- which lights took maps, of what kind, and at what world-space
 	// resolution, which is what decides whether small casters survive
-	if ( r_glesD3Report.GetInteger() >= 2 ) {
+	if ( reportLights ) {
 		for ( int i = 0; i < gles_numShadowLights; i++ ) {
 			const glesShadowLight_t &light = gles_shadowLights[i];
 			const viewLight_t *v = light.vLight;
