@@ -636,12 +636,12 @@ void RB_GLESD3_DrawView( void ) {
 		int shadowLights = 0, shadowPoint = 0, shadowMapped = 0, shadowStencil = 0, shadowCasters = 0;
 		RB_GLESD3_ShadowMapReport( shadowLights, shadowPoint, shadowMapped, shadowStencil, shadowCasters );
 		common->Printf( "glesd3 afterMaterial(view %i): drawElements=%i px[ %s] "
-				"fog=%i/%i draws=%i skipped=%i depthHack weapon=%i model=%i "
+				"fog=%i/%i draws=%i skipped=%i depthHack weapon=%i model=%i backEndIndexUploads=%i "
 				"shadowMaps lights=%i point=%i mappedPasses=%i stencilPasses=%i casterDraws=%i err=0x%04x\n",
 				rb_glesD3Reported3DViews, backEnd.pc.c_drawElements,
 				samples.c_str(),
 				fogLights, blendLights, fogDraws, fogSkips,
-				weaponHackDraws, modelHackDraws,
+				weaponHackDraws, modelHackDraws, R_GLESD3_BackEndIndexUploads(),
 				shadowLights, shadowPoint, shadowMapped, shadowStencil, shadowCasters, glGetError() );
 		R_GLESD3_ReportSkipCounts();
 	}

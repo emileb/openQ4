@@ -88,6 +88,7 @@ void	R_GLESD3_SetupProgramForDraw( const struct glesProgram_s *program,
 // matching depth range, so call it for every 3D surface, not just the hacked ones.
 void	R_GLESD3_SpaceMVP( const viewEntity_t *space, float mvp[16] );
 void	R_GLESD3_DepthHackCounts( int &weaponDraws, int &modelDraws );
+int		R_GLESD3_BackEndIndexUploads( void );
 
 /*
 ====================
