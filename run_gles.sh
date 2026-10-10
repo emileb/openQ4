@@ -19,6 +19,16 @@
 #     instead of the hard-edged stencil shadows; lights the maps cannot serve
 #     keep stencil, so turning this on never removes a shadow
 #
+# Two optional looks, off in both presets because neither is stock Quake 4 --
+# they match what diii4a (idTech4A++) shows by default:
+#
+#   wet specular (broad Phong)     r_glesD3SpecularModel P
+#     highlights spread across lit surfaces; r_glesD3SpecularExponent sets
+#     how wet (3 = diii4a, lower = wetter)
+#   fill light                     r_glesD3FillLight     L
+#     a fixed-direction light on every surface, so dark corners stay
+#     visible; r_glesD3FillLightBrightness sets it (0.3 = diii4a)
+#
 # Decals are not on a switch: the material pass used to drop every projected
 # decal outright, and that was a bug, not a look.
 #
@@ -46,7 +56,8 @@
 #
 # --ab writes .tmp/render-shots/shot_glesd3_ab_<scene>_{old,new}.png and opens
 # both. "old" means only that the switches above are off -- the decal fix and
-# every earlier gles_d3 change are still in.
+# every earlier gles_d3 change are still in. The look scenes (wet, fill)
+# compare against the current renderer instead, so only the look changes.
 
 set -eu
 
@@ -57,12 +68,17 @@ SHOT_DIR="$REPO_ROOT/.tmp/render-shots"
 
 [ -x "$CLIENT" ] || { echo "no client binary at $CLIENT (build first: ninja -C builddir)" >&2; exit 1; }
 
-NEW_CVARS=( r_glesD3GLSLPrograms 1 r_glesD3DepthHack 1 r_brightness 1 r_gamma 1 r_useShadowMap 1 )
-OLD_CVARS=( r_glesD3GLSLPrograms 0 r_glesD3DepthHack 0 r_brightness 1 r_gamma 1 r_useShadowMap 0 )
+# the looks are pinned off in both: they are archived, and a value left in the
+# config would otherwise leak into every comparison
+NEW_CVARS=( r_glesD3GLSLPrograms 1 r_glesD3DepthHack 1 r_brightness 1 r_gamma 1 r_useShadowMap 1
+	r_glesD3SpecularModel 0 r_glesD3FillLight 0 )
+OLD_CVARS=( r_glesD3GLSLPrograms 0 r_glesD3DepthHack 0 r_brightness 1 r_gamma 1 r_useShadowMap 0
+	r_glesD3SpecularModel 0 r_glesD3FillLight 0 )
 
 # --ab scenes: map | setviewpos | console commands before the teleport |
-# settle msec | cvars for the "new" shot on top of NEW_CVARS. Each view was
-# chosen while verifying the feature, so it frames what changes.
+# settle msec | cvars for the "new" shot on top of NEW_CVARS | what "old" is
+# ("new" = the current renderer, for the looks; empty = OLD_CVARS). Each view
+# was chosen while verifying the feature, so it frames what changes.
 scene_spec() {
 	case "$1" in
 		tanks)
@@ -93,20 +109,27 @@ scene_spec() {
 		shadows_marine)
 			# an animated character lit by point lights: cube-map casters
 			echo "game/hangar1|-5256 2864 -5819.75 15 -90 0|noclip|1500|" ;;
+		wet)
+			# the gun, the floor grating and the walls pick up the broad sheen
+			echo "game/hangar1|||1500|r_glesD3SpecularModel 1|new" ;;
+		fill)
+			echo "game/hangar1|||1500|r_glesD3FillLight 1|new" ;;
 		*)
 			return 1 ;;
 	esac
 }
-SCENES="tanks bloodpool bulletholes gun brightness gamma shadows shadows_marine"
+SCENES="tanks bloodpool bulletholes gun brightness gamma shadows shadows_marine wet fill"
 
 run_ab() {
-	local scene="$1" spec map viewpos precmds settle extra
+	local scene="$1" spec map viewpos precmds settle extra oldbase
 	spec="$(scene_spec "$scene")" || { echo "unknown scene '$scene' (try --list)" >&2; return 1; }
-	IFS='|' read -r map viewpos precmds settle extra <<< "$spec"
+	IFS='|' read -r map viewpos precmds settle extra oldbase <<< "$spec"
 
 	local variant cvars
 	for variant in old new; do
-		if [ "$variant" = old ]; then
+		if [ "$variant" = old ] && [ "$oldbase" = new ]; then
+			cvars="${NEW_CVARS[*]}"
+		elif [ "$variant" = old ]; then
 			cvars="${OLD_CVARS[*]}"
 		else
 			cvars="${NEW_CVARS[*]}${extra:+ $extra}"
@@ -154,7 +177,7 @@ done
 
 LOG="${OPENQ4_LOG:-/tmp/openq4-gles.log}"
 echo "logging to $LOG" >&2
-echo "live keys: F4 GLSL programs  F8 depth hack  F10 brightness  F11 gamma  O shadow maps  F9 view position" >&2
+echo "live keys: F4 GLSL programs  F8 depth hack  F10 brightness  F11 gamma  O shadow maps  P wet specular  L fill light  F9 view position" >&2
 
 # r_renderApi and r_renderer are archived; pass both so a stale config cannot
 # redirect the run (see run_glesd3.sh). con_noPrint 0 puts the toggles' echo
@@ -174,6 +197,8 @@ echo "live keys: F4 GLSL programs  F8 depth hack  F10 brightness  F11 gamma  O s
 	+bind F10 "toggle r_brightness 1 1.25 1.5" \
 	+bind F11 "toggle r_gamma 1 1.2 1.4" \
 	+bind o "toggle r_useShadowMap" \
+	+bind p "toggle r_glesD3SpecularModel" \
+	+bind l "toggle r_glesD3FillLight" \
 	+bind F9 getviewpos \
 	+set g_autoSkipCinematics 1 \
 	2>&1 | tee "$LOG"
