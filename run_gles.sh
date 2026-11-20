@@ -140,7 +140,7 @@ run_ab() {
 		RENDER_SHOT_PRECMDS="$precmds" \
 		RENDER_SHOT_SETTLE="$settle" \
 		RENDER_SHOT_SET="$cvars" \
-			"$REPO_ROOT/tools/debug/render_shot.sh" glesd3 "ab_${scene}_${variant}" \
+			"$REPO_ROOT/tools/debug/render_shot_gles.sh" glesd3 "ab_${scene}_${variant}" \
 			| grep -E "exit status|screenshot" || true
 	done
 	if command -v open >/dev/null 2>&1; then
