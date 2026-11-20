@@ -290,9 +290,13 @@ void idSysLocal::DLL_GetFileName( const char *baseName, char *dllName, int maxLe
 	}
 #elif defined( __ANDROID__ )
 	// Only lib*.so is packaged into the APK and extracted to the native library
-	// directory, so every module carries the prefix there.
+	// directory, so every module carries the prefix there. The suffix lets a
+	// second openQ4 build ship its modules in the same APK.
+#ifndef OPENQ4_ANDROID_MODULE_SUFFIX
+#define OPENQ4_ANDROID_MODULE_SUFFIX ""
+#endif
 	if ( explicitGameModuleName ) {
-		idStr::snPrintf( dllName, maxLength, "lib%s.so", baseName );
+		idStr::snPrintf( dllName, maxLength, "lib%s" OPENQ4_ANDROID_MODULE_SUFFIX ".so", baseName );
 	} else {
 		idStr::snPrintf( dllName, maxLength, "lib%s" CPUSTRING ".so", baseName );
 	}

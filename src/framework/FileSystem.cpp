@@ -6623,7 +6623,14 @@ void idFileSystemLocal::Startup( void ) {
 
 	idStr openQ4PakErrors;
 	bool onlyClientPacks = false;
-	if ( !ValidateOpenQ4Paks( openQ4PakErrors, onlyClientPacks ) ) {
+#if defined( __ANDROID__ ) && defined( OPENQ4_SIGMATOUCH )
+	// The host repacks pak1/pak2 for what GLES can use, and needs the same
+	// escape hatch from a stale pack set that the retail checks have.
+	const bool validateOpenQ4Paks = fs_validateOfficialPaks.GetBool();
+#else
+	const bool validateOpenQ4Paks = true;
+#endif
+	if ( validateOpenQ4Paks && !ValidateOpenQ4Paks( openQ4PakErrors, onlyClientPacks ) ) {
 		PrintContentSearchDiagnostics();
 		if ( !onlyClientPacks ) {
 			idStr expectedPacks;

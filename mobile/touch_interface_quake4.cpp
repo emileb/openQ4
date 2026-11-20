@@ -51,7 +51,7 @@ void TouchInterface::mouseMove(int action, float x, float y, float mouse_x, floa
         // Hold for a few frames: the GUI samples button state per frame, so a
         // press and release inside one frame reads as never-clicked.
         MouseButton(1, BUTTON_PRIMARY);
-        waitFrames(3);
+        //waitFrames(3);
         MouseButton(0, BUTTON_PRIMARY);
     }
 }
@@ -212,6 +212,13 @@ void TouchInterface::createControls(std::string filesPath)
     tcYesNo->addControl(new touchcontrols::Button("no", touchcontrols::RectF(15, 12, 18, 15), "key_n", PORT_ACT_MENU_ABORT));
     tcYesNo->signal_button.connect(sigc::mem_fun(this, &TouchInterface::menuButton));
     tcYesNo->setAlpha(0.8);
+
+    //Custom buttons -------------------------------------------
+    //------------------------------------------------------
+    // Shared set (6 buttons, 4 hidden extras, 4 quad slides) sending
+    // PORT_ACT_CUSTOM_*; game_interface.cpp turns those into the keys their
+    // labels name, to be bound in Quake 4's own controls menu.
+    createCustomControls(tcCustomButtons);
 
     //Gamepad utility -------------------------------------------
     //------------------------------------------------------

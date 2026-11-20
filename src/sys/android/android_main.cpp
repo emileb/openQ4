@@ -99,7 +99,11 @@ const char *Sys_DefaultSavePath( void ) {
 	if ( userFiles != NULL && userFiles[0] == '/' ) {
 		savepath = userFiles;
 		savepath.StripTrailing( '/' );
-		savepath += "/quake4";
+		// a second openQ4 build in the same app keeps its own configs and saves
+#ifndef OPENQ4_ANDROID_USER_DIR
+#define OPENQ4_ANDROID_USER_DIR "quake4"
+#endif
+		savepath += "/" OPENQ4_ANDROID_USER_DIR;
 	} else {
 		const char *internalStorage = SDL_GetAndroidInternalStoragePath();
 		savepath = internalStorage != NULL ? internalStorage : Posix_Cwd();

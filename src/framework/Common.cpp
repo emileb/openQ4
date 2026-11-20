@@ -7617,7 +7617,10 @@ void idCommonLocal::InitGame( void ) {
 	openQ4PerformancePresetCVarBackup_t startupPresetBootstrap[OPENQ4_PERFORMANCE_PRESET_TOUCHED_CVAR_COUNT];
 	bool startupPresetAssigned[OPENQ4_PERFORMANCE_PRESET_TOUCHED_CVAR_COUNT] = {};
 	openq4::CVarAssignmentCapture startupPresetCapture;
-#ifndef ID_DEDICATED
+#if defined( __ANDROID__ ) && defined( OPENQ4_SIGMATOUCH )
+	// The host sends its own graphics settings, and the preset's vid_restart
+	// rebuilds the window, which leaves this host on a black screen.
+#elif !defined( ID_DEDICATED )
 	detectStartupPreset = sysDetect && !SafeMode() && fileSystem->ReadFile( CONFIG_FILE, NULL ) < 0;
 	if ( detectStartupPreset ) {
 		detectStartupPreset = Common_BootstrapStartupPerformancePreset( startupPresetBootstrap );
