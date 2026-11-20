@@ -9,6 +9,8 @@
 
 #include <pthread.h>
 #include <errno.h>
+#include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <mutex>
 #include <stdio.h>
@@ -284,6 +286,34 @@ static int axisValue(float unit)
     return (int)(unit * AXIS_MAX);
 }
 
+// Cursor speed for a fully deflected look stick in a menu, in mouse counts per second.
+#define MENU_STICK_CURSOR_SPEED 375.0f
+
+// Menus ignore the look axes, so in a menu the gamepad's look stick moves the cursor instead.
+static void menuStickCursor(float yawJoy, float pitchJoy)
+{
+    static double lastTime;
+    static float carryX, carryY;
+    const double now = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    const float dt = lastTime > 0.0 ? (float)std::min(now - lastTime, 0.1) : 0.0f;
+    lastTime = now;
+    if (yawJoy == 0.0f && pitchJoy == 0.0f)
+    {
+        carryX = carryY = 0.0f;
+        return;
+    }
+    // squared response for fine control near the centre
+    carryX += -yawJoy * std::fabs(yawJoy) * MENU_STICK_CURSOR_SPEED * dt;
+    carryY += pitchJoy * std::fabs(pitchJoy) * MENU_STICK_CURSOR_SPEED * dt;
+    const int dx = (int)carryX;
+    const int dy = (int)carryY;
+    carryX -= (float)dx;
+    carryY -= (float)dy;
+    // through SDL's own mouse, as the touch pointer does: menus read its position on clicks and page changes
+    if (dx || dy)
+        MouseMove((float)-dx, (float)-dy);
+}
+
 extern "C" void Quake4_DrainTouchInput(void)
 {
     TouchEvent events[EVENT_QUEUE_SIZE];
@@ -349,6 +379,9 @@ extern "C" void Quake4_DrainTouchInput(void)
     // negated pitch relative to its mouse value, hence the signs.
     Quake4_PostJoystickAxis(QUAKE4_AXIS_SIDE, -axisValue(yawJoy));
     Quake4_PostJoystickAxis(QUAKE4_AXIS_FORWARD, axisValue(pitchJoy));
+
+    if (Quake4_GetScreenMode() != TS_GAME)
+        menuStickCursor(yawJoy, pitchJoy);
 
     // Take the whole counts and leave the remainder to be carried into the
     // next frame, so nothing is lost between drains.
@@ -420,6 +453,15 @@ void PortableAction(int state, int action)
         case PORT_ACT_QUICKLOAD: if (state) queueCommand("loadgame quick"); return;
 
         default: break;
+    }
+
+    // Fire clicks in menus; the release matches the press even if the menu closed in between
+    static bool fireClicked;
+    if (action == PORT_ACT_ATTACK && (state ? menuUp : fireClicked))
+    {
+        fireClicked = state;
+        MouseButton(state, BUTTON_PRIMARY);
+        return;
     }
 
     // Releases are handled whatever the mode is: a menu that closes on the press
