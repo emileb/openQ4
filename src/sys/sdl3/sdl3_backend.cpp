@@ -7090,7 +7090,12 @@ static void SDL3_WindowServices_NotifyWindowReady(void) {
 }
 
 static void SDL3_WindowServices_BeginWindowTeardown(void) {
+#if defined(__ANDROID__) && defined(OPENQ4_SIGMATOUCH)
+	// The host's one surface does not come back once destroyed: keep it across reloads
+	s_teardownPreserveWindow = s_sdlWindow != NULL;
+#else
 	s_teardownPreserveWindow = s_preserveWindowOnShutdown && s_sdlWindow != NULL;
+#endif
 
 	SDL3_DisableWindowAspectSnap();
 	IN_DeactivateMouse();
