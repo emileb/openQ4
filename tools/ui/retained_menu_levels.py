@@ -277,7 +277,8 @@ def detail_page_frame(ui, doc, title_key, content_parts):
         titles.append(breadcrumb(ui,doc,'crumb'+str(i),key,39+97*i))
     titles.append(ui.page_title('title',title_key,233,19))
     titles[-1]['properties']['opacity']=ui.number(1)
-    title_group=ui.group('titles',bounds,titles)
+    # the title layer covers the whole canvas and must not take the pointer
+    title_group=ui.group('titles',{**bounds,'pointer-events':ui.keyword('none')},titles)
     doc.timelines.add('arrive',150,[ui.track('content','opacity',[(0,ui.number(0)),(150,ui.number(1))])])
     doc.events['onActivate'].append({'op':'playTimeline','timeline':'arrive'})
     return bands,content,title_group
