@@ -29,7 +29,6 @@
 #include "gles_program.h"
 
 static glesProgram_t *		gles_shadowProgram = NULL;
-static const viewEntity_t *	gles_shadowOriginSpace = NULL;
 static int					gles_shadowDraws = 0;
 
 /*
@@ -97,21 +96,14 @@ static void RB_GLESD3_T_Shadow( const drawSurf_t *surf ) {
 		return;
 	}
 
-	// the light origin is per-space, and the shader wants it local with w = 0
-	if ( surf->space != gles_shadowOriginSpace ) {
-		idVec4 localLight;
-		R_GlobalPointToLocal( surf->space->modelMatrix, backEnd.vLight->globalLightOrigin,
-				localLight.ToVec3() );
-		localLight.w = 0.0f;
-		glUniform4fv( gles_shadowProgram->uLightOrigin, 1, localLight.ToFloatPtr() );
-		gles_shadowOriginSpace = surf->space;
-	}
+	// no light origin uniform: the shadow cache already holds finished
+	// homogeneous positions (see stencilShadowShaderVP.cpp)
 
 	if ( surf->space != backEnd.currentSpace ) {
 		backEnd.currentSpace = surf->space;
 	}
 	float mvp[ 16 ];
-	myGlMultMatrix( surf->space->modelViewMatrix, backEnd.viewDef->projectionMatrix, mvp );
+	R_GLESD3_SpaceMVP( surf->space, mvp );
 	glUniformMatrix4fv( gles_shadowProgram->uMVP, 1, GL_FALSE, mvp );
 
 	// an empty rect covers no pixels: skip rather than issue a rejected call
@@ -233,9 +225,6 @@ void RB_GLESD3_StencilShadowPass( const drawSurf_t *drawSurfs ) {
 
 	glStencilFunc( GL_ALWAYS, 1, 255 );
 
-	// tracked separately from backEnd.currentSpace, which the interaction pass
-	// also advances
-	gles_shadowOriginSpace = NULL;
 
 	for ( const drawSurf_t *surf = drawSurfs; surf != NULL; surf = surf->nextOnLight ) {
 		RB_GLESD3_T_Shadow( surf );

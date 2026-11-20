@@ -27,6 +27,7 @@
 #include "../tr_local.h"
 #include "gles_d3_local.h"
 #include "gles_program.h"
+#include "../TemporalPresentation.h"
 
 /*
 ====================
@@ -93,6 +94,105 @@ static idCVar r_glesD3PresentSceneTarget( "r_glesD3PresentSceneTarget", "1", CVA
 
 /*
 ====================
+RB_GLESD3_BeginTargetScale / RB_GLESD3_EndTargetScale / RB_GLESD3_ScissorToGL
+
+Since 0.13 the game renders the world into its own scene target at the
+presentation scene size (idGameLocal::RenderScene resizes it from
+GetPresentationState, which applies r_screenFraction) and composites the
+result at native resolution. The front end still lays the view out in native
+coordinates. On desktop RB_STD_DrawView maps the view into that target with
+RB_BeginSceneScalingToExtent in draw_common.cpp, a file this module does not
+compile; without the mapping a native-size viewport lands in a smaller target
+and the composite shows its bottom-left corner blown up.
+
+Same mapping, done the other way round: the viewport is set to the target
+extent for the duration of the view, so everything that reads it (the
+_currentRender copy, the screen-space program parms) sees the real extent,
+while every scissor rect stays in native view space and is scaled at the one
+place a rect reaches glScissor. The detection is RB_FeedbackSceneTargetScalingExtent's.
+====================
+*/
+typedef struct glesD3TargetScale_s {
+	bool			active;
+	float			scaleX;
+	float			scaleY;
+	idScreenRect	nativeViewport;
+} glesD3TargetScale_t;
+
+static glesD3TargetScale_t rb_glesD3TargetScale;
+
+static void RB_GLESD3_BeginTargetScale( void ) {
+	rb_glesD3TargetScale.active = false;
+
+	viewDef_t *viewDef = const_cast<viewDef_t *>( backEnd.viewDef );
+	if ( viewDef == NULL || viewDef->viewEntitys == NULL
+			|| backEnd.renderTexture == NULL
+			|| backEnd.renderTexture != backEnd.feedbackRenderTexture ) {
+		return;
+	}
+	const bool portalSky = ( viewDef->renderFlags & RF_PORTAL_SKY ) != 0;
+	if ( !portalSky && ( viewDef->isSubview || viewDef->superView != NULL
+			|| viewDef->subviewSurface != NULL || viewDef->renderView.viewID < 0
+			|| viewDef->isXraySubview || viewDef->isEditor ) ) {
+		return;
+	}
+
+	const temporalPresentationFrameState_t &presentation = R_TemporalPresentation_GetFrameState();
+	const int nativeWidth = viewDef->viewport.x2 - viewDef->viewport.x1 + 1;
+	const int nativeHeight = viewDef->viewport.y2 - viewDef->viewport.y1 + 1;
+	if ( nativeWidth <= 0 || nativeHeight <= 0
+			|| nativeWidth != presentation.nativeWidth
+			|| nativeHeight != presentation.nativeHeight
+			|| presentation.sceneWidth <= 0 || presentation.sceneHeight <= 0
+			|| ( presentation.sceneWidth == nativeWidth && presentation.sceneHeight == nativeHeight )
+			|| backEnd.renderTexture->GetWidth() != presentation.sceneWidth
+			|| backEnd.renderTexture->GetHeight() != presentation.sceneHeight ) {
+		return;
+	}
+
+	rb_glesD3TargetScale.active = true;
+	rb_glesD3TargetScale.scaleX = (float)presentation.sceneWidth / (float)nativeWidth;
+	rb_glesD3TargetScale.scaleY = (float)presentation.sceneHeight / (float)nativeHeight;
+	rb_glesD3TargetScale.nativeViewport = viewDef->viewport;
+	viewDef->viewport.x1 = 0;
+	viewDef->viewport.y1 = 0;
+	viewDef->viewport.x2 = (short)( presentation.sceneWidth - 1 );
+	viewDef->viewport.y2 = (short)( presentation.sceneHeight - 1 );
+}
+
+static void RB_GLESD3_EndTargetScale( void ) {
+	if ( !rb_glesD3TargetScale.active ) {
+		return;
+	}
+	viewDef_t *viewDef = const_cast<viewDef_t *>( backEnd.viewDef );
+	viewDef->viewport = rb_glesD3TargetScale.nativeViewport;
+	rb_glesD3TargetScale.active = false;
+}
+
+// a view-local scissor rect to the GL box it covers in the bound target
+static void RB_GLESD3_ScissorToGL( const idScreenRect &rect, GLint &x, GLint &y, GLsizei &w, GLsizei &h ) {
+	const viewDef_t *viewDef = backEnd.viewDef;
+	if ( !rb_glesD3TargetScale.active ) {
+		x = RB_TileOffsetX() + viewDef->viewport.x1 + rect.x1;
+		y = RB_TileOffsetY() + viewDef->viewport.y1 + rect.y1;
+		w = rect.x2 + 1 - rect.x1;
+		h = rect.y2 + 1 - rect.y1;
+		return;
+	}
+	// floor both edges in the scaled space so adjacent native rects stay
+	// adjacent rather than overlapping or leaving a seam
+	const int x1 = idMath::Ftoi( idMath::Floor( rect.x1 * rb_glesD3TargetScale.scaleX ) );
+	const int x2 = idMath::Ftoi( idMath::Floor( ( rect.x2 + 1 ) * rb_glesD3TargetScale.scaleX ) );
+	const int y1 = idMath::Ftoi( idMath::Floor( rect.y1 * rb_glesD3TargetScale.scaleY ) );
+	const int y2 = idMath::Ftoi( idMath::Floor( ( rect.y2 + 1 ) * rb_glesD3TargetScale.scaleY ) );
+	x = RB_TileOffsetX() + viewDef->viewport.x1 + x1;
+	y = RB_TileOffsetY() + viewDef->viewport.y1 + y1;
+	w = Max( 1, x2 - x1 );
+	h = Max( 1, y2 - y1 );
+}
+
+/*
+====================
 RB_GLESD3_SetScissor
 ====================
 */
@@ -110,10 +210,9 @@ bool RB_GLESD3_SetScissor( const idScreenRect &rect ) {
 
 	backEnd.currentScissor = rect;
 
-	const GLint x = backEnd.viewDef->viewport.x1 + rect.x1;
-	const GLint y = backEnd.viewDef->viewport.y1 + rect.y1;
-	const GLsizei w = rect.x2 + 1 - rect.x1;
-	const GLsizei h = rect.y2 + 1 - rect.y1;
+	GLint x, y;
+	GLsizei w, h;
+	RB_GLESD3_ScissorToGL( rect, x, y, w, h );
 	glScissor( x, y, w, h );
 
 	return true;
@@ -228,10 +327,12 @@ static void RB_GLESD3_BeginDrawingView( void ) {
 		viewDef->viewport.y2 + 1 - viewDef->viewport.y1 );
 
 	// the scissor may be smaller than the viewport for subviews
-	glScissor( RB_TileOffsetX() + viewDef->viewport.x1 + viewDef->scissor.x1,
-		RB_TileOffsetY() + viewDef->viewport.y1 + viewDef->scissor.y1,
-		viewDef->scissor.x2 + 1 - viewDef->scissor.x1,
-		viewDef->scissor.y2 + 1 - viewDef->scissor.y1 );
+	{
+		GLint x, y;
+		GLsizei w, h;
+		RB_GLESD3_ScissorToGL( viewDef->scissor, x, y, w, h );
+		glScissor( x, y, w, h );
+	}
 	backEnd.currentScissor = viewDef->scissor;
 
 	// ensures that depth writes are enabled for the depth clear
@@ -408,6 +509,14 @@ void RB_GLESD3_DrawView( void ) {
 
 	backEnd.depthFunc = GLS_DEPTHFUNC_EQUAL;
 
+	// Shadow maps first, before the scene target is cleared or drawn into, so
+	// a tiled GPU leaves it once per view instead of once per light. Inert
+	// unless r_useShadowMap is set.
+	if ( backEnd.viewDef->viewEntitys != NULL && RB_GLESD3_EnsureResources() ) {
+		RB_GLESD3_RenderShadowMaps();
+	}
+
+	RB_GLESD3_BeginTargetScale();
 	RB_GLESD3_BeginDrawingView();
 
 	// 3D views are what this backend is being built for, and a run opens with
@@ -474,6 +583,9 @@ void RB_GLESD3_DrawView( void ) {
 		// fill the depth buffer and clear colour to black, except on subviews
 		RB_GLESD3_FillDepthBuffer( drawSurfs, numDrawSurfs );
 
+		// optional diii4a-style fill light, onto the prepass black
+		RB_GLESD3_DrawFillLight( drawSurfs, numDrawSurfs );
+
 		// the main light renderer; D5 adds stencil shadows inside it
 		RB_GLESD3_DrawInteractions();
 
@@ -521,11 +633,18 @@ void RB_GLESD3_DrawView( void ) {
 		RB_GLESD3_SamplePixels( samples );
 		int fogLights = 0, blendLights = 0, fogDraws = 0, fogSkips = 0;
 		RB_GLESD3_FogBlendCounts( fogLights, blendLights, fogDraws, fogSkips );
+		int weaponHackDraws = 0, modelHackDraws = 0;
+		R_GLESD3_DepthHackCounts( weaponHackDraws, modelHackDraws );
+		int shadowLights = 0, shadowPoint = 0, shadowMapped = 0, shadowStencil = 0, shadowCasters = 0;
+		RB_GLESD3_ShadowMapReport( shadowLights, shadowPoint, shadowMapped, shadowStencil, shadowCasters );
 		common->Printf( "glesd3 afterMaterial(view %i): drawElements=%i px[ %s] "
-				"fog=%i/%i draws=%i skipped=%i err=0x%04x\n",
+				"fog=%i/%i draws=%i skipped=%i depthHack weapon=%i model=%i backEndIndexUploads=%i "
+				"shadowMaps lights=%i point=%i mappedPasses=%i stencilPasses=%i casterDraws=%i err=0x%04x\n",
 				rb_glesD3Reported3DViews, backEnd.pc.c_drawElements,
 				samples.c_str(),
-				fogLights, blendLights, fogDraws, fogSkips, glGetError() );
+				fogLights, blendLights, fogDraws, fogSkips,
+				weaponHackDraws, modelHackDraws, R_GLESD3_BackEndIndexUploads(),
+				shadowLights, shadowPoint, shadowMapped, shadowStencil, shadowCasters, glGetError() );
 		R_GLESD3_ReportSkipCounts();
 	}
 
@@ -537,6 +656,7 @@ void RB_GLESD3_DrawView( void ) {
 		RB_GLES_ResolveSceneResolutionScale();
 		RB_GLESD3_PresentSceneTarget();
 	}
+	RB_GLESD3_EndTargetScale();
 
 	// Hand the context back with a full scissor. The engine runs
 	// scissor-sensitive commands BETWEEN views with no scissor handling of
@@ -560,6 +680,81 @@ void RB_GLESD3_DrawView( void ) {
 	backEnd.currentScissor.y1 = 0;
 	backEnd.currentScissor.x2 = glConfig.vidWidth - 1;
 	backEnd.currentScissor.y2 = glConfig.vidHeight - 1;
+}
+
+/*
+====================
+RB_GLESD3_ApplyColorMappings
+
+RB_ApplyColorMappingsToBackBuffer (draw_common.cpp:6420), which this module
+excludes. GLimp_SetGamma does nothing on an ES context, so before this the
+in-game brightness and gamma settings had no effect on Android at all.
+
+Same shape as the desktop pass: copy the finished back buffer -- world, HUD
+and menus alike, as a hardware ramp would affect -- into _currentRender and
+draw it back through the curve. Free at the defaults: a neutral setting
+returns before the copy.
+====================
+*/
+void RB_GLESD3_ApplyColorMappings( void ) {
+	const float brightness = idMath::ClampFloat( 0.0f, 16.0f, r_brightness.GetFloat() );
+	const float gamma = Max( r_gamma.GetFloat(), 0.001f );
+	if ( idMath::Fabs( brightness - 1.0f ) <= 0.0001f && idMath::Fabs( gamma - 1.0f ) <= 0.0001f ) {
+		return;
+	}
+
+	const int width = glConfig.vidWidth;
+	const int height = glConfig.vidHeight;
+	idImage *sceneImage = globalImages->currentRenderImage;
+	if ( sceneImage == NULL || width <= 0 || height <= 0 ) {
+		return;
+	}
+	if ( !RB_GLESD3_EnsureResources() ) {
+		return;
+	}
+	const glesProgram_t *program = R_GLESD3_Program( GLESD3_PROGRAM_COLOR_MAPPING );
+	if ( program == NULL ) {
+		return;
+	}
+
+	RB_LogComment( "---------- RB_GLESD3_ApplyColorMappings ----------\n" );
+
+	// the back buffer, not whatever target the last view left bound: with
+	// backEnd.renderTexture set, CopyFramebuffer would read that instead
+	idRenderTexture::BindNull();
+	backEnd.renderTexture = NULL;
+	glViewport( 0, 0, width, height );
+	glScissor( 0, 0, width, height );
+	backEnd.currentScissor.x1 = 0;
+	backEnd.currentScissor.y1 = 0;
+	backEnd.currentScissor.x2 = width - 1;
+	backEnd.currentScissor.y2 = height - 1;
+
+	if ( !sceneImage->CopyFramebuffer( 0, 0, width, height ) ) {
+		return;
+	}
+	const int textureWidth = sceneImage->GetOpts().width;
+	const int textureHeight = sceneImage->GetOpts().height;
+	if ( textureWidth <= 0 || textureHeight <= 0 ) {
+		return;
+	}
+
+	R_GLESD3_Draw_BeginView();
+	R_GLESD3_DisableAllAttributes();
+	glDisable( GL_STENCIL_TEST );
+	GL_Cull( CT_TWO_SIDED );
+	GL_State( GLS_DEPTHFUNC_ALWAYS | GLS_DEPTHMASK );
+
+	R_GLESD3_UseProgram( program );
+	glUniform4f( program->uColor, brightness, gamma,
+			(float)width / (float)textureWidth, (float)height / (float)textureHeight );
+	GL_SelectTexture( 0 );
+	sceneImage->Bind();
+
+	glDrawArrays( GL_TRIANGLES, 0, 3 );
+
+	globalImages->BindNull();
+	R_GLESD3_Draw_EndView();
 }
 
 #endif /* OPENQ4_RENDERER_GLES_MODULE */

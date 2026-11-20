@@ -2069,6 +2069,17 @@ bool idRenderSystemLocal::PushSceneResolutionScale( const renderView_t &renderVi
 			}
 			return false;
 		}
+
+		// Since 0.13 the game renders the world at the presentation scene size
+		// (idGameLocal::RenderScene resizes its targets from GetPresentationState,
+		// which already applies r_screenFraction) and composites it at native
+		// resolution. A target smaller than the display is that path: cropping
+		// again inside it would scale twice, and the resolve would blit the crop
+		// out to display size in a target that has no room for it. The crop below
+		// is only for the direct path, where the world goes to the back buffer.
+		if ( sceneColor->GetOpts().width != glConfig.vidWidth || sceneColor->GetOpts().height != glConfig.vidHeight ) {
+			return false;
+		}
 	}
 
 	CropRenderSize( SCREEN_WIDTH * screenFraction / 100.0f, SCREEN_HEIGHT * screenFraction / 100.0f );

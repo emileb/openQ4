@@ -114,6 +114,26 @@ typedef struct glesProgram_s {
 	// shader sets stay diffable -- the ports were made from each other and the
 	// slot numbering is the shared contract.
 	GLint		uParms;
+
+	// shadow maps (gles_shadowmap.cpp). Casters: the light-space depth row and
+	// the caster depth offset. Receivers: the light clip rows localized to the
+	// surface (projected) or the light origin and far envelope (point), plus
+	// bias and PCF parameters. The map itself is uShadowMap on unit 6, bound
+	// at link like the other samplers.
+	GLint		uShadowDepthRow;
+	GLint		uShadowCasterOffset;
+	GLint		uShadowRow0;
+	GLint		uShadowRow1;
+	GLint		uShadowRow2;
+	GLint		uShadowRow3;
+	GLint		uShadowBias;
+	GLint		uShadowFilter;
+	GLint		uShadowLightOriginFar;
+
+	// optional looks (gles_lookoptions in gles_interaction.cpp): x is the
+	// broad-Phong specular exponent in the GLESD3_SPECULAR_PHONG interaction
+	// programs, and the fill brightness in the fill-light program
+	GLint		uShadingParams;
 } glesProgram_t;
 
 typedef enum {
@@ -146,6 +166,32 @@ typedef enum {
 	GLESD3_PROGRAM_HEATHAZE,
 	GLESD3_PROGRAM_HEATHAZE_MASK,
 	GLESD3_PROGRAM_MONOCHROME,
+	// r_gamma / r_brightness over the finished back buffer, at swap time
+	GLESD3_PROGRAM_COLOR_MAPPING,
+	// Raven's GLSL material programs: `glslProgram glsl/<name>.glsl` stages,
+	// which retail gates behind `if ( glslPrograms == 1 )`
+	GLESD3_PROGRAM_GLSL_MULTIPLY_BLEND,
+	GLESD3_PROGRAM_GLSL_DISPLACEMENT,
+	GLESD3_PROGRAM_GLSL_DISPLACEMENT_CUBE,
+	GLESD3_PROGRAM_GLSL_SNIPER_STRETCH2,
+	// shadow-map casters: linear light depth written from the fragment stage,
+	// projected (falloff-plane depth) and point (radial distance) flavours of
+	// one source, each with an ALPHATEST variant for perforated casters
+	GLESD3_PROGRAM_SHADOW_CASTER,
+	GLESD3_PROGRAM_SHADOW_POINT_CASTER,
+	// the interaction program with the shadow-map lookup compiled in --
+	// the same source as GLESD3_PROGRAM_INTERACTION, specialised by a base
+	// define rather than duplicated
+	GLESD3_PROGRAM_INTERACTION_SHADOW,
+	GLESD3_PROGRAM_INTERACTION_SHADOW_POINT,
+	// r_glesD3SpecularModel 1: the same three interaction programs with a broad
+	// Phong highlight compiled in place of the stock _specularTable ramp. A
+	// separate program per combination, so no shader ever branches on it.
+	GLESD3_PROGRAM_INTERACTION_PHONG,
+	GLESD3_PROGRAM_INTERACTION_SHADOW_PHONG,
+	GLESD3_PROGRAM_INTERACTION_SHADOW_POINT_PHONG,
+	// r_glesD3FillLight: a constant-direction fill over every opaque surface
+	GLESD3_PROGRAM_FILL_LIGHT,
 	GLESD3_PROGRAM_COUNT
 } glesD3ProgramId_t;
 

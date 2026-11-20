@@ -77,6 +77,7 @@ bool	R_GLESD3_BindDrawVertAttributes( const srfTriangles_t *tri );
 bool	R_GLESD3_BindCubeTexDirAttribute( const drawSurf_t *surf, bool fromNormal );
 void	R_GLESD3_DisableCubeTexDirAttribute( void );
 void	R_GLESD3_EnableAttributesForShadow( void );
+void	R_GLESD3_DisableAllAttributes( void );
 void	R_GLESD3_InvalidateAttributeState( void );
 vertCache_t *	R_GLESD3_EnsureIndexCache( const srfTriangles_t *tri );
 bool	R_GLESD3_DrawElements( const srfTriangles_t *tri );
@@ -84,6 +85,11 @@ float	R_GLESD3_AlphaTestReference( int stateBits );
 void	R_GLESD3_SetAlphaTest( const struct glesProgram_s *program, int stateBits );
 void	R_GLESD3_SetupProgramForDraw( const struct glesProgram_s *program,
 				const float mvp[16], const idVec4 &color );
+// A space's MVP with the weapon/model depth hacks applied; also sets the
+// matching depth range, so call it for every 3D surface, not just the hacked ones.
+void	R_GLESD3_SpaceMVP( const viewEntity_t *space, float mvp[16] );
+void	R_GLESD3_DepthHackCounts( int &weaponDraws, int &modelDraws );
+int		R_GLESD3_BackEndIndexUploads( void );
 
 /*
 ====================
@@ -96,6 +102,22 @@ drawn with program 0.
 ====================
 */
 bool	RB_GLESD3_EnsureResources( void );
+
+/*
+====================
+RB_GLESD3_ApplyColorMappings
+
+r_gamma and r_brightness for a context with no hardware gamma ramp, which on
+ES is every context. Called at swap from RB_ApplyColorMappingsToBackBuffer.
+====================
+*/
+void	RB_GLESD3_ApplyColorMappings( void );
+
+// gles_shaderpasses.cpp -- the stock Raven GLSL material programs. Validate
+// answers whether this backend can draw a glslProgram stage; the material
+// variant is what the `glslPrograms` register evaluates to.
+bool	R_GLESD3_ValidateGLSLProgram( newShaderStage_t *stage );
+bool	R_GLESD3_MaterialGLSLProgramsAvailable( const idMaterial *material );
 
 // gles_shaderpasses.cpp -- authored material stages, 2D and GUI.
 // Returns the number of surfaces consumed; stops at the first SS_POST_PROCESS
@@ -147,6 +169,10 @@ void	RB_GLESD3_FillDepthBuffer( drawSurf_t **drawSurfs, int numDrawSurfs );
 // depth prepass and the material pass; without it a Quake 4 scene is black,
 // because its surfaces carry no ambient stage.
 void	RB_GLESD3_DrawInteractions( void );
+// r_glesD3SpecularModel 1: the interaction programs to use are the _PHONG ones
+bool	R_GLESD3_PhongSpecular( void );
+// r_glesD3FillLight: the fixed-direction fill, after the depth prepass
+void	RB_GLESD3_DrawFillLight( drawSurf_t **drawSurfs, int numDrawSurfs );
 void	RB_GLESD3_DetermineLightScale( void );
 
 // The two texgen helpers from the excluded draw_common.cpp. Defined in
@@ -155,6 +181,24 @@ void	RB_GLESD3_DetermineLightScale( void );
 void	R_GLESD3_BakeTextureMatrixIntoTexgen( idPlane lightProject[3], const float textureMatrix[16] );
 void	R_GLESD3_GetShaderTextureMatrix( const float *shaderRegisters,
 				const textureStage_t *texture, float matrix[16] );
+
+// gles_shadowmap.cpp -- shadow maps, opt-in with r_useShadowMap. Stencil
+// volumes are still built for every light, so a pass the maps cannot serve
+// falls back to stencil within the same view.
+typedef enum {
+	GLESD3_SHADOWPASS_STENCIL = 0,	// not mapped: the stencil volumes shadow it
+	GLESD3_SHADOWPASS_MAP,			// sample this view's shadow map
+	GLESD3_SHADOWPASS_UNSHADOWED	// mapped light, but the pass has no casters
+} glesD3ShadowPassMode_t;
+
+void	RB_GLESD3_RenderShadowMaps( void );
+void	RB_GLESD3_ShutdownShadowMaps( void );
+glesD3ShadowPassMode_t	RB_GLESD3_ShadowMapPassMode( const viewLight_t *vLight, bool globalPass );
+struct glesProgram_s *	RB_GLESD3_ShadowMapBeginPass( const viewLight_t *vLight, bool globalPass );
+void	RB_GLESD3_ShadowMapEndPass( void );
+void	RB_GLESD3_ShadowMapCountStencilPass( void );
+void	RB_GLESD3_ShadowMapSetReceiverUniforms( const struct glesProgram_s *program, const drawSurf_t *surf );
+void	RB_GLESD3_ShadowMapReport( int &mappedLights, int &pointLights, int &mappedPasses, int &stencilPasses, int &casterDraws );
 
 // gles_fog.cpp -- fog volumes and blend lights, the last two Doom 3 core
 // passes. Runs between the two material walks, where RB_STD_DrawView puts it.

@@ -108,4 +108,30 @@ extern const char * const glesHeatHazeMaskShaderFP;
 extern const char * const glesMonochromeShaderVP;
 extern const char * const glesMonochromeShaderFP;
 
+// r_gamma / r_brightness applied to the finished back buffer at swap; ES has
+// no hardware gamma ramp. The curve of builtin/final_color_mapping.
+extern const char * const glesColorMappingShaderVP;
+extern const char * const glesColorMappingShaderFP;
+
+// Raven's GLSL material programs (glslProgram glsl/*.glsl), ported from the
+// Vulkan material_* shaders. MultiplyBlend and Displacement share a vertex
+// stage; DisplacementCube and SniperStretch2 carry their own.
+extern const char * const glesGlslStageShaderVP;
+extern const char * const glesMultiplyBlendShaderFP;
+extern const char * const glesDisplacementShaderFP;
+extern const char * const glesDisplacementCubeShaderVP;
+extern const char * const glesDisplacementCubeShaderFP;
+extern const char * const glesSniperStretch2ShaderVP;
+extern const char * const glesSniperStretch2ShaderFP;
+
+// shadow-map casters, from Vulkan/shaders/shadow_caster.* and
+// shadow_point_caster.* in one source split by GLESD3_SHADOW_POINT
+extern const char * const glesShadowCasterShaderVP;
+extern const char * const glesShadowCasterShaderFP;
+
+// r_glesD3FillLight: a constant-direction fill light over every opaque
+// surface, after diii4a's harm_r_globalIllumination
+extern const char * const glesFillLightShaderVP;
+extern const char * const glesFillLightShaderFP;
+
 #endif /* !__GLES_D3_GLSL_SHADERS_H__ */

@@ -1212,7 +1212,7 @@ static bool R_BindTextureToUnit( int texUnit, GLenum target, GLuint texture ) {
 	}
 
 	// Experimental loaders can expose entry points absent from this context.
-	if ( GLCapabilityProbe_HasExtension( "GL_EXT_direct_state_access" ) && glBindMultiTextureEXT != NULL ) {
+	if ( glConfig.backendCaps.hasEXTDirectStateAccess && glBindMultiTextureEXT != NULL ) {
 		glBindMultiTextureEXT( GL_TEXTURE0_ARB + texUnit, target, texture );
 		return true;
 	}
@@ -1968,8 +1968,12 @@ void idImage::UploadScratch( const byte * data, int cols, int rows ) {
 		}
 
 	} else {
+		// A scratch image created with an explicit nearest filter (idRenderSystem::CreateImage
+		// from a game module) keeps it, one created with TF_DEFAULT keeps that too (so it gets
+		// mipmaps: DeriveOpts only builds them for TF_DEFAULT); everything else stays linear.
+		const textureFilter_t scratchFilter = ( filter == TF_NEAREST || filter == TF_DEFAULT ) ? filter : TF_LINEAR;
 		if ( opts.textureType != TT_2D || usage != TD_LOOKUP_TABLE_RGBA ) {
-			GenerateImage( data, cols, rows, TF_LINEAR, TR_REPEAT, TD_LOOKUP_TABLE_RGBA );
+			GenerateImage( data, cols, rows, scratchFilter, TR_REPEAT, TD_LOOKUP_TABLE_RGBA );
 			return;
 		}
 		if ( opts.width != cols || opts.height != rows ) {
@@ -1978,7 +1982,7 @@ void idImage::UploadScratch( const byte * data, int cols, int rows ) {
 			opts.height = rows;
 			AllocImage();
 		}
-		SetSamplerState( TF_LINEAR, TR_REPEAT );
+		SetSamplerState( scratchFilter, TR_REPEAT );
 		SubImageUpload( 0, 0, 0, 0, opts.width, opts.height, data );
 	}
 }

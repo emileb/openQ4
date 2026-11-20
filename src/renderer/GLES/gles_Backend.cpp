@@ -22,7 +22,7 @@
 	  RB_DrawSpecialEffects              legacy BSE effects
 	  RB_ApplyResolutionScaleToBackBuffer
 	  RB_ApplyCRTToBackBuffer            legacy back-buffer post
-	  RB_ApplyColorMappingsToBackBuffer
+	  RB_ApplyColorMappingsToBackBuffer  (gles_d3 supplies its own)
 
 	plus the ARB2 shadow-cache parity surface and the shared-ownership view
 	owners further down, which report "not taken" so the caller keeps its
@@ -397,13 +397,17 @@ void RB_GLES_ResolveSceneResolutionScale( void ) {
 Legacy back-buffer post
 
 Resolution scaling, CRT emulation and colour mapping are all implemented in
-draw_common.cpp against fixed-function state. The CRT and colour-mapping ones
-are cosmetic passes over the finished frame; leaving them out costs those
-effects and nothing else.
+draw_common.cpp against fixed-function state. CRT emulation is a cosmetic pass
+over the finished frame; leaving it out costs that effect and nothing else.
 
-Resolution scaling is not cosmetic, and this module implements it for real in
-RB_GLES_ResolveSceneResolutionScale above -- scoped to the scene view, where it
-can leave the HUD alone. Nothing is left to do at swap time.
+Colour mapping is not cosmetic here. On desktop r_gamma/r_brightness normally
+go to a hardware gamma ramp, but an ES context has none, so without a shader
+pass the game's brightness setting does nothing. gles_d3 provides one
+(RB_GLESD3_ApplyColorMappings).
+
+Resolution scaling is not cosmetic either, and this module implements it for
+real in RB_GLES_ResolveSceneResolutionScale above -- scoped to the scene view,
+where it can leave the HUD alone. Nothing is left to do for it at swap time.
 ====================
 */
 
@@ -413,7 +417,11 @@ void RB_ApplyResolutionScaleToBackBuffer( void ) {
 void RB_ApplyCRTToBackBuffer( void ) {
 }
 
+// ES has no hardware gamma ramp; gles_d3 applies r_gamma/r_brightness itself
 void RB_ApplyColorMappingsToBackBuffer( void ) {
+	if ( RB_GLESD3_Active() ) {
+		RB_GLESD3_ApplyColorMappings();
+	}
 }
 
 /*
@@ -536,8 +544,11 @@ void R_ReportShaderPrograms_f( const idCmdArgs &args ) {
 	( void )args;
 }
 
+// gles_d3 draws the four stock Raven GLSL families with its own ports
 bool R_ValidateGLSLProgram( newShaderStage_t *stage ) {
-	( void )stage;
+	if ( RB_GLESD3_Active() ) {
+		return R_GLESD3_ValidateGLSLProgram( stage );
+	}
 	return false;
 }
 
@@ -590,7 +601,10 @@ bool RB_ShadowMapTextureBindings( rendererShadowTextureBindings_t &bindings ) {
 }
 
 void RB_ShutdownScenePostProcess( void ) { }
-void RB_ShutdownShadowMapResources( void ) { }
+// gles_d3's own maps; harmless when none were ever created
+void RB_ShutdownShadowMapResources( void ) {
+	RB_GLESD3_ShutdownShadowMaps();
+}
 
 void RB_ResetARB2InteractionHandoffBreadcrumb( void ) { }
 

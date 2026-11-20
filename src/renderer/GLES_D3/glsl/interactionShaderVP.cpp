@@ -57,6 +57,32 @@ out vec3 vHalfAngleVector;
 out vec3 vVertexColor;
 out vec3 vViewVector;
 
+// Shadow-map receivers (GLESD3_PROGRAM_INTERACTION_SHADOW*), from
+// Vulkan/shaders/interaction_shadow.vert and interaction_shadow_point.vert.
+// Normal-offset shadows push the sampled point along the geometric normal by
+// (texel size x sin theta) before projecting, which fixes self-shadow acne
+// without the contact-shadow detachment a larger depth bias would cause.
+// uShadowBias.w is that normal offset in world units (projected) or per unit
+// of distance (point).
+#ifdef GLESD3_SHADOW_PROJECTED
+uniform vec4 uShadowRow0;
+uniform vec4 uShadowRow1;
+uniform vec4 uShadowRow2;
+uniform vec4 uShadowRow3;
+uniform vec4 uShadowBias;
+out vec4 vShadowCoord;
+out float vShadowLightCos;
+#endif
+#ifdef GLESD3_SHADOW_POINT
+uniform vec4 uModelRow0;
+uniform vec4 uModelRow1;
+uniform vec4 uModelRow2;
+uniform vec4 uShadowLightOriginFar;
+uniform vec4 uShadowBias;
+out vec3 vPointShadowVector;
+out float vShadowLightCos;
+#endif
+
 vec3 TangentSpaceVector(vec3 objectVector) {
     return vec3(
         dot(inTangent, objectVector),
@@ -89,6 +115,31 @@ void main() {
         dot(position, uLightProjectionQ));
 
     vVertexColor = inColor.rgb * uVertexColor.x + vec3(uVertexColor.y);
+
+#if defined(GLESD3_SHADOW_PROJECTED) || defined(GLESD3_SHADOW_POINT)
+    vec3 shadowNormal = normalize(inNormal);
+    float shadowLightCos = max(dot(shadowNormal, normalize(toLight)), 0.0);
+    float shadowSinTheta = sqrt(max(1.0 - shadowLightCos * shadowLightCos, 0.0));
+    vShadowLightCos = shadowLightCos;
+#endif
+#ifdef GLESD3_SHADOW_PROJECTED
+    vec4 offsetPosition = vec4(position.xyz + shadowNormal * (uShadowBias.w * shadowSinTheta), 1.0);
+    vShadowCoord = vec4(
+        dot(offsetPosition, uShadowRow0),
+        dot(offsetPosition, uShadowRow1),
+        dot(offsetPosition, uShadowRow2),
+        dot(offsetPosition, uShadowRow3));
+#endif
+#ifdef GLESD3_SHADOW_POINT
+    vec3 worldPos = vec3(dot(position, uModelRow0), dot(position, uModelRow1), dot(position, uModelRow2));
+    vec3 pointShadowVector = worldPos - uShadowLightOriginFar.xyz;
+    vec3 worldNormal = normalize(vec3(
+        dot(vec4(inNormal, 0.0), uModelRow0),
+        dot(vec4(inNormal, 0.0), uModelRow1),
+        dot(vec4(inNormal, 0.0), uModelRow2)));
+    float normalOffset = uShadowBias.w * length(pointShadowVector) * shadowSinTheta;
+    vPointShadowVector = pointShadowVector + worldNormal * normalOffset;
+#endif
 
     gl_Position = uMVP * position;
 }

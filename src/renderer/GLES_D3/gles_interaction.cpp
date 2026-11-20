@@ -47,6 +47,40 @@ static glesProgram_t *	gles_interactionProgram = NULL;
 // the common per-light fragment path carries no branch (gles_program.h, D8).
 static glesProgram_t *	gles_interactionAmbientProgram = NULL;
 static float			gles_ambientDir[ 3 ] = { 1.0f, 0.0f, 0.0f };
+// the shadow-map receiver program while a mapped pass is drawing, else NULL;
+// ambient lights never take one (gles_shadowmap.cpp rejects them)
+static glesProgram_t *	gles_shadowReceiverProgram = NULL;
+
+/*
+====================
+Optional looks
+
+Neither is the stock Quake 4 look; both default off and exist to match what
+players see in diii4a (idTech4A++), whose defaults turn them on. Each is a
+separately compiled program chosen here on the CPU, so no shader carries a
+runtime branch for either.
+
+r_glesD3SpecularModel 1 swaps the stock _specularTable highlight -- tight,
+only near the mirror direction -- for diii4a's broad Phong, pow(R.V, 3) x2,
+which spreads a sheen over most lit surfaces: the "wet" look.
+
+r_glesD3FillLight 1 adds diii4a's harm_r_globalIllumination: a fixed-
+direction half-Lambert fill on every opaque surface before the real lights,
+so corners Quake 4 leaves pitch black stay visible.
+====================
+*/
+static idCVar r_glesD3SpecularModel( "r_glesD3SpecularModel", "0", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_INTEGER,
+		"gles_d3 specular: 0 = stock Quake 4, 1 = broad Phong like diii4a (wetter-looking surfaces)", 0, 1 );
+static idCVar r_glesD3SpecularExponent( "r_glesD3SpecularExponent", "3", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_FLOAT,
+		"gles_d3: Phong exponent for r_glesD3SpecularModel 1; lower is broader and wetter (diii4a uses 3)", 0.5f, 128.0f );
+static idCVar r_glesD3FillLight( "r_glesD3FillLight", "0", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_BOOL,
+		"gles_d3: add a fixed-direction fill light to every opaque surface, like diii4a's global illumination" );
+static idCVar r_glesD3FillLightBrightness( "r_glesD3FillLightBrightness", "0.3", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_FLOAT,
+		"gles_d3: strength of r_glesD3FillLight (diii4a uses 0.3)", 0.0f, 4.0f );
+
+bool R_GLESD3_PhongSpecular( void ) {
+	return r_glesD3SpecularModel.GetInteger() == 1;
+}
 static int				gles_interactionDraws = 0;
 static bool				gles_reportedLights = false;
 
@@ -189,7 +223,8 @@ static void GLESD3_DrawInteraction( const drawInteraction_t *din ) {
 	const drawSurf_t *surf = din->surf;
 	const srfTriangles_t *tri = surf->geo;
 	glesProgram_t *program = din->ambientLight
-			? gles_interactionAmbientProgram : gles_interactionProgram;
+			? gles_interactionAmbientProgram
+			: ( gles_shadowReceiverProgram != NULL ? gles_shadowReceiverProgram : gles_interactionProgram );
 
 	// tri->indexCache may legitimately be NULL here: R_CreateAmbientCache
 	// (tr_light.cpp:242) allocates VERTICES ONLY, so a light's generated
@@ -207,7 +242,7 @@ static void GLESD3_DrawInteraction( const drawInteraction_t *din ) {
 	}
 
 	float mvp[ 16 ];
-	myGlMultMatrix( surf->space->modelViewMatrix, backEnd.viewDef->projectionMatrix, mvp );
+	R_GLESD3_SpaceMVP( surf->space, mvp );
 
 	R_GLESD3_UseProgram( program );
 	glUniformMatrix4fv( program->uMVP, 1, GL_FALSE, mvp );
@@ -229,6 +264,12 @@ static void GLESD3_DrawInteraction( const drawInteraction_t *din ) {
 
 	// only the ambient variant declares uAmbientDir; -1 no-ops on the base
 	glUniform3fv( program->uAmbientDir, 1, gles_ambientDir );
+
+	if ( program == gles_shadowReceiverProgram ) {
+		RB_GLESD3_ShadowMapSetReceiverUniforms( program, surf );
+	}
+	// declared only by the GLESD3_SPECULAR_PHONG programs; -1 no-ops elsewhere
+	glUniform4f( program->uShadingParams, Max( 0.5f, r_glesD3SpecularExponent.GetFloat() ), 0.0f, 0.0f, 0.0f );
 
 	// the (rgbModulate, rgbAdd, alphaModulate, alphaAdd) SVC packing, shared
 	// with the material program. The interaction shader consumes only the RGB
@@ -464,6 +505,32 @@ static void GLESD3_DrawInteractionChain( const drawSurf_t *chain, int depthFunc 
 
 /*
 ====================
+GLESD3_DrawShadowMappedChain
+
+A receiver chain lit through a shadow map instead of the stencil test: the
+stencil test is opened, the pass's map is bound, and every interaction draws
+with the shadowed program. UNSHADOWED passes (a mapped light with no casters
+for this receiver class) draw with the ordinary program and no test.
+====================
+*/
+static void GLESD3_DrawShadowMappedChain( const viewLight_t *vLight, const drawSurf_t *chain,
+		bool globalPass, glesD3ShadowPassMode_t mode, int depthFunc = GLS_DEPTHFUNC_EQUAL ) {
+	if ( chain == NULL ) {
+		return;
+	}
+	glStencilFunc( GL_ALWAYS, 128, 255 );
+	if ( mode == GLESD3_SHADOWPASS_MAP ) {
+		gles_shadowReceiverProgram = RB_GLESD3_ShadowMapBeginPass( vLight, globalPass );
+	}
+	GLESD3_DrawInteractionChain( chain, depthFunc );
+	if ( gles_shadowReceiverProgram != NULL ) {
+		RB_GLESD3_ShadowMapEndPass();
+		gles_shadowReceiverProgram = NULL;
+	}
+}
+
+/*
+====================
 RB_GLESD3_DetermineLightScale
 
 RB_DetermineLightScale (tr_render.cpp:675). tr.backEndRendererMaxLight is 999
@@ -514,7 +581,8 @@ void RB_GLESD3_DrawInteractions( void ) {
 		return;
 	}
 
-	gles_interactionProgram = R_GLESD3_Program( GLESD3_PROGRAM_INTERACTION );
+	gles_interactionProgram = R_GLESD3_Program( R_GLESD3_PhongSpecular()
+			? GLESD3_PROGRAM_INTERACTION_PHONG : GLESD3_PROGRAM_INTERACTION );
 	gles_interactionAmbientProgram = R_GLESD3_Program( GLESD3_PROGRAM_INTERACTION,
 			GLESD3_VARIANT_AMBIENT );
 	if ( gles_interactionProgram == NULL ) {
@@ -561,6 +629,66 @@ void RB_GLESD3_DrawInteractions( void ) {
 		const int drawsBeforeLight = gles_interactionDraws;
 
 		const bool hasShadows = ( vLight->globalShadows != NULL || vLight->localShadows != NULL );
+
+		// r_useShadowMap: each receiver pass is shadowed by this view's map, or
+		// falls back to the stencil volumes below, which are always built
+		const glesD3ShadowPassMode_t localMode = RB_GLESD3_ShadowMapPassMode( vLight, false );
+		const glesD3ShadowPassMode_t globalMode = RB_GLESD3_ShadowMapPassMode( vLight, true );
+		if ( localMode != GLESD3_SHADOWPASS_STENCIL || globalMode != GLESD3_SHADOWPASS_STENCIL ) {
+			if ( localMode == GLESD3_SHADOWPASS_STENCIL ) {
+				RB_GLESD3_ShadowMapCountStencilPass();
+			}
+			if ( globalMode == GLESD3_SHADOWPASS_STENCIL ) {
+				RB_GLESD3_ShadowMapCountStencilPass();
+			}
+			const bool anyStencil = hasShadows
+					&& ( localMode == GLESD3_SHADOWPASS_STENCIL || globalMode == GLESD3_SHADOWPASS_STENCIL );
+			if ( anyStencil && RB_GLESD3_SetScissor( vLight->scissorRect ) ) {
+				glClear( GL_STENCIL_BUFFER_BIT );
+			}
+
+			// local receivers: shadowed by the global casters only
+			if ( localMode == GLESD3_SHADOWPASS_STENCIL ) {
+				if ( hasShadows ) {
+					RB_GLESD3_StencilShadowPass( vLight->globalShadows );
+				} else {
+					glStencilFunc( GL_ALWAYS, 128, 255 );
+				}
+				GLESD3_DrawInteractionChain( vLight->localInteractions );
+			} else {
+				GLESD3_DrawShadowMappedChain( vLight, vLight->localInteractions, false, localMode );
+			}
+
+			// global receivers: shadowed by everything. On the stencil side the
+			// global volumes go in first unless the local pass already put them
+			// there.
+			if ( globalMode == GLESD3_SHADOWPASS_STENCIL ) {
+				if ( hasShadows ) {
+					if ( localMode != GLESD3_SHADOWPASS_STENCIL ) {
+						RB_GLESD3_StencilShadowPass( vLight->globalShadows );
+					}
+					RB_GLESD3_StencilShadowPass( vLight->localShadows );
+				} else {
+					glStencilFunc( GL_ALWAYS, 128, 255 );
+				}
+				GLESD3_DrawInteractionChain( vLight->globalInteractions );
+			} else {
+				GLESD3_DrawShadowMappedChain( vLight, vLight->globalInteractions, true, globalMode );
+			}
+
+			if ( !r_skipTranslucent.GetBool() ) {
+				if ( globalMode != GLESD3_SHADOWPASS_STENCIL && r_shadowMapTranslucentReceivers.GetBool() ) {
+					GLESD3_DrawShadowMappedChain( vLight, vLight->translucentInteractions, true, globalMode,
+							GLS_DEPTHFUNC_LESS );
+				} else {
+					const bool shadowTranslucent = r_stencilTranslucentShadows.GetBool() && r_shadows.GetBool()
+							&& hasShadows && globalMode == GLESD3_SHADOWPASS_STENCIL;
+					glStencilFunc( shadowTranslucent ? GL_GEQUAL : GL_ALWAYS, 128, 255 );
+					GLESD3_DrawInteractionChain( vLight->translucentInteractions, GLS_DEPTHFUNC_LESS );
+				}
+			}
+			continue;
+		}
 
 		if ( hasShadows ) {
 			// Every light starts from a clean stencil. Without this the volumes
@@ -645,6 +773,166 @@ void RB_GLESD3_DrawInteractions( void ) {
 				backEnd.lightScale, backEnd.overBright,
 				tr.stencilIncr == GL_INCR_WRAP_EXT ? 1 : 0 );
 	}
+}
+
+/*
+===============================================================================
+	Fill light (r_glesD3FillLight)
+===============================================================================
+*/
+
+/*
+====================
+GLESD3_DrawFillLightInteraction
+====================
+*/
+static void GLESD3_DrawFillLightInteraction( const glesProgram_t *program, drawInteraction_t *din ) {
+	if ( din->bumpImage == NULL ) {
+		return;
+	}
+	if ( din->diffuseImage == NULL ) {
+		din->diffuseImage = globalImages->blackImage;
+	}
+	if ( din->specularImage == NULL ) {
+		din->specularImage = globalImages->blackImage;
+	}
+	const srfTriangles_t *tri = din->surf->geo;
+
+	glUniform4fv( program->uLocalViewOrigin, 1, din->localViewOrigin.ToFloatPtr() );
+	glUniform4fv( program->uBumpMatrixS, 1, din->bumpMatrix[0].ToFloatPtr() );
+	glUniform4fv( program->uBumpMatrixT, 1, din->bumpMatrix[1].ToFloatPtr() );
+	glUniform4fv( program->uDiffuseMatrixS, 1, din->diffuseMatrix[0].ToFloatPtr() );
+	glUniform4fv( program->uDiffuseMatrixT, 1, din->diffuseMatrix[1].ToFloatPtr() );
+	glUniform4fv( program->uSpecularMatrixS, 1, din->specularMatrix[0].ToFloatPtr() );
+	glUniform4fv( program->uSpecularMatrixT, 1, din->specularMatrix[1].ToFloatPtr() );
+	glUniform4fv( program->uDiffuseColor, 1, din->diffuseColor.ToFloatPtr() );
+	glUniform4fv( program->uSpecularColor, 1, din->specularColor.ToFloatPtr() );
+	float vertexColor[4] = { 0.0f, 1.0f, 0.0f, 1.0f };
+	if ( din->vertexColor == SVC_MODULATE ) {
+		vertexColor[0] = 1.0f;	vertexColor[1] = 0.0f;
+	} else if ( din->vertexColor == SVC_INVERSE_MODULATE ) {
+		vertexColor[0] = -1.0f;	vertexColor[1] = 1.0f;
+	}
+	glUniform4fv( program->uVertexColor, 1, vertexColor );
+
+	GL_SelectTexture( GLESD3_TMU_BUMP );
+	din->bumpImage->Bind();
+	GL_SelectTexture( GLESD3_TMU_DIFFUSE );
+	din->diffuseImage->Bind();
+	GL_SelectTexture( GLESD3_TMU_SPECULAR );
+	din->specularImage->Bind();
+	GL_SelectTexture( 0 );
+
+	R_GLESD3_DrawElements( tri );
+}
+
+/*
+====================
+GLESD3_CreateFillLightInteractions
+
+The material's bump/diffuse/specular stages decomposed as for a light
+(RB_CreateSingleDrawGlobalIllumination in diii4a), with the stage colours
+alone: there is no light colour, the brightness uniform stands in for it.
+====================
+*/
+static void GLESD3_CreateFillLightInteractions( const glesProgram_t *program, const drawSurf_t *surf ) {
+	const idMaterial *shader = surf->material;
+	const float *regs = surf->shaderRegisters;
+	if ( shader == NULL || regs == NULL || shader->Coverage() == MC_TRANSLUCENT
+			|| surf->geo == NULL || surf->geo->ambientCache == NULL || surf->geo->numIndexes == 0 ) {
+		return;
+	}
+	if ( !RB_GLESD3_SetScissor( surf->scissorRect ) ) {
+		return;
+	}
+	if ( !R_GLESD3_BindDrawVertAttributes( surf->geo ) ) {
+		return;
+	}
+	float mvp[16];
+	R_GLESD3_SpaceMVP( surf->space, mvp );
+	glUniformMatrix4fv( program->uMVP, 1, GL_FALSE, mvp );
+
+	drawInteraction_t inter;
+	memset( &inter, 0, sizeof( inter ) );
+	inter.surf = surf;
+	R_GlobalPointToLocal( surf->space->modelMatrix, backEnd.viewDef->renderView.vieworg, inter.localViewOrigin.ToVec3() );
+	inter.localViewOrigin[3] = 1.0f;
+
+	const int stageCount = shader->GetNumStages();
+	for ( int i = 0; i < stageCount; i++ ) {
+		const shaderStage_t *stage = shader->GetStage( i );
+		if ( !regs[ stage->conditionRegister ] ) {
+			continue;
+		}
+		switch ( stage->lighting ) {
+			case SL_BUMP:
+				GLESD3_DrawFillLightInteraction( program, &inter );
+				inter.diffuseImage = NULL;
+				inter.specularImage = NULL;
+				GLESD3_SetDrawInteraction( stage, regs, &inter.bumpImage, inter.bumpMatrix, NULL );
+				break;
+			case SL_DIFFUSE:
+				if ( inter.diffuseImage != NULL ) {
+					GLESD3_DrawFillLightInteraction( program, &inter );
+				}
+				GLESD3_SetDrawInteraction( stage, regs, &inter.diffuseImage, inter.diffuseMatrix,
+						inter.diffuseColor.ToFloatPtr() );
+				inter.vertexColor = stage->vertexColor;
+				break;
+			case SL_SPECULAR:
+				if ( inter.specularImage != NULL ) {
+					GLESD3_DrawFillLightInteraction( program, &inter );
+				}
+				GLESD3_SetDrawInteraction( stage, regs, &inter.specularImage, inter.specularMatrix,
+						inter.specularColor.ToFloatPtr() );
+				inter.vertexColor = stage->vertexColor;
+				break;
+			default:
+				break;
+		}
+	}
+	GLESD3_DrawFillLightInteraction( program, &inter );
+}
+
+/*
+====================
+RB_GLESD3_DrawFillLight
+
+After the depth prepass, before the interactions: added at depth EQUAL onto
+the black the prepass wrote, so the real lights then add on top of it.
+====================
+*/
+void RB_GLESD3_DrawFillLight( drawSurf_t **drawSurfs, int numDrawSurfs ) {
+	if ( !r_glesD3FillLight.GetBool() || backEnd.viewDef == NULL || backEnd.viewDef->viewEntitys == NULL
+			|| drawSurfs == NULL || numDrawSurfs <= 0 ) {
+		return;
+	}
+	const glesProgram_t *program = R_GLESD3_Program( GLESD3_PROGRAM_FILL_LIGHT );
+	if ( program == NULL ) {
+		return;
+	}
+	RB_LogComment( "---------- RB_GLESD3_DrawFillLight ----------\n" );
+
+	GL_State( GLS_SRCBLEND_ONE | GLS_DSTBLEND_ONE | GLS_DEPTHMASK | GLS_DEPTHFUNC_EQUAL );
+	GL_Cull( CT_FRONT_SIDED );
+	glStencilFunc( GL_ALWAYS, 128, 255 );
+	R_GLESD3_UseProgram( program );
+	glUniform4f( program->uShadingParams, r_glesD3FillLightBrightness.GetFloat(), 0.0f, 0.0f, 0.0f );
+
+	for ( int i = 0; i < numDrawSurfs; i++ ) {
+		if ( drawSurfs[i]->material == NULL || drawSurfs[i]->material->SuppressInSubview() ) {
+			continue;
+		}
+		GL_Cull( drawSurfs[i]->material->GetCullType() );
+		GLESD3_CreateFillLightInteractions( program, drawSurfs[i] );
+	}
+
+	for ( int unit = GLESD3_TMU_SPECULAR; unit >= 0; unit-- ) {
+		GL_SelectTexture( unit );
+		globalImages->BindNull();
+	}
+	GL_SelectTexture( 0 );
+	GL_Cull( CT_FRONT_SIDED );
 }
 
 #endif /* OPENQ4_RENDERER_GLES_MODULE */

@@ -175,7 +175,7 @@ static void GLESD3_T_BasicFog( const drawSurf_t *surf ) {
 		backEnd.currentSpace = surf->space;
 
 		float mvp[ 16 ];
-		myGlMultMatrix( surf->space->modelViewMatrix, backEnd.viewDef->projectionMatrix, mvp );
+		R_GLESD3_SpaceMVP( surf->space, mvp );
 		glUniformMatrix4fv( gles_fogProgram->uMVP, 1, GL_FALSE, mvp );
 
 		idPlane local;
@@ -351,7 +351,7 @@ static void GLESD3_T_BlendLight( const drawSurf_t *surf ) {
 		backEnd.currentSpace = surf->space;
 
 		float mvp[ 16 ];
-		myGlMultMatrix( surf->space->modelViewMatrix, backEnd.viewDef->projectionMatrix, mvp );
+		R_GLESD3_SpaceMVP( surf->space, mvp );
 		glUniformMatrix4fv( gles_blendProgram->uMVP, 1, GL_FALSE, mvp );
 
 		idPlane lightProject[ 4 ];

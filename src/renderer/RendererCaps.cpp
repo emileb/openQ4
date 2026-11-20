@@ -223,6 +223,7 @@ static void RendererDriverQuirks_DisableModernBaseline( renderBackendCaps_t &cap
 	caps.hasBufferStorage = false;
 	caps.hasTextureStorage = false;
 	caps.hasDSA = false;
+	caps.hasEXTDirectStateAccess = false;
 	caps.hasMultiBind = false;
 	caps.hasGLSpirv = false;
 	caps.hasBindlessTexture = false;
@@ -1204,6 +1205,7 @@ void GLCapabilityProbe_Build( renderBackendCaps_t &caps, const char *versionStri
 	caps.hasBufferStorage = caps.glVersion >= 4.4f || GLCapabilityProbe_HasExtension( "GL_ARB_buffer_storage" );
 	caps.hasTextureStorage = caps.glVersion >= 4.2f || GLCapabilityProbe_HasExtension( "GL_ARB_texture_storage" );
 	caps.hasDSA = caps.glVersion >= 4.5f || GLCapabilityProbe_HasExtension( "GL_ARB_direct_state_access" );
+	caps.hasEXTDirectStateAccess = GLCapabilityProbe_HasExtension( "GL_EXT_direct_state_access" );
 	caps.hasMultiBind = caps.glVersion >= 4.4f || GLCapabilityProbe_HasExtension( "GL_ARB_multi_bind" );
 	caps.hasCompute = caps.glVersion >= 4.3f || GLCapabilityProbe_HasExtension( "GL_ARB_compute_shader" );
 	caps.hasSSBO = caps.glVersion >= 4.3f || GLCapabilityProbe_HasExtension( "GL_ARB_shader_storage_buffer_object" );

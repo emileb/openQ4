@@ -58,6 +58,27 @@ const char *R_GLESD3_EmbeddedShaderSource( glesD3ProgramId_t id, GLenum stage ) 
 			return vertex ? glesHeatHazeShaderVP : glesHeatHazeMaskShaderFP;
 		case GLESD3_PROGRAM_MONOCHROME:
 			return vertex ? glesMonochromeShaderVP : glesMonochromeShaderFP;
+		case GLESD3_PROGRAM_COLOR_MAPPING:
+			return vertex ? glesColorMappingShaderVP : glesColorMappingShaderFP;
+		case GLESD3_PROGRAM_GLSL_MULTIPLY_BLEND:
+			return vertex ? glesGlslStageShaderVP : glesMultiplyBlendShaderFP;
+		case GLESD3_PROGRAM_GLSL_DISPLACEMENT:
+			return vertex ? glesGlslStageShaderVP : glesDisplacementShaderFP;
+		case GLESD3_PROGRAM_GLSL_DISPLACEMENT_CUBE:
+			return vertex ? glesDisplacementCubeShaderVP : glesDisplacementCubeShaderFP;
+		case GLESD3_PROGRAM_GLSL_SNIPER_STRETCH2:
+			return vertex ? glesSniperStretch2ShaderVP : glesSniperStretch2ShaderFP;
+		case GLESD3_PROGRAM_SHADOW_CASTER:
+		case GLESD3_PROGRAM_SHADOW_POINT_CASTER:
+			return vertex ? glesShadowCasterShaderVP : glesShadowCasterShaderFP;
+		case GLESD3_PROGRAM_INTERACTION_SHADOW:
+		case GLESD3_PROGRAM_INTERACTION_SHADOW_POINT:
+		case GLESD3_PROGRAM_INTERACTION_PHONG:
+		case GLESD3_PROGRAM_INTERACTION_SHADOW_PHONG:
+		case GLESD3_PROGRAM_INTERACTION_SHADOW_POINT_PHONG:
+			return vertex ? glesInteractionShaderVP : glesInteractionShaderFP;
+		case GLESD3_PROGRAM_FILL_LIGHT:
+			return vertex ? glesFillLightShaderVP : glesFillLightShaderFP;
 		default:
 			return NULL;
 	}
@@ -97,6 +118,32 @@ const char *R_GLESD3_ProgramName( glesD3ProgramId_t id ) {
 			return "gles_d3_heathaze_mask";
 		case GLESD3_PROGRAM_MONOCHROME:
 			return "gles_d3_monochrome";
+		case GLESD3_PROGRAM_COLOR_MAPPING:
+			return "gles_d3_colormapping";
+		case GLESD3_PROGRAM_GLSL_MULTIPLY_BLEND:
+			return "gles_d3_glsl_multiplyblend";
+		case GLESD3_PROGRAM_GLSL_DISPLACEMENT:
+			return "gles_d3_glsl_displacement";
+		case GLESD3_PROGRAM_GLSL_DISPLACEMENT_CUBE:
+			return "gles_d3_glsl_displacementcube";
+		case GLESD3_PROGRAM_GLSL_SNIPER_STRETCH2:
+			return "gles_d3_glsl_sniperstretch2";
+		case GLESD3_PROGRAM_SHADOW_CASTER:
+			return "gles_d3_shadowcaster";
+		case GLESD3_PROGRAM_SHADOW_POINT_CASTER:
+			return "gles_d3_shadowcaster_point";
+		case GLESD3_PROGRAM_INTERACTION_SHADOW:
+			return "gles_d3_interaction_shadow";
+		case GLESD3_PROGRAM_INTERACTION_SHADOW_POINT:
+			return "gles_d3_interaction_shadow_point";
+		case GLESD3_PROGRAM_INTERACTION_PHONG:
+			return "gles_d3_interaction_phong";
+		case GLESD3_PROGRAM_INTERACTION_SHADOW_PHONG:
+			return "gles_d3_interaction_shadow_phong";
+		case GLESD3_PROGRAM_INTERACTION_SHADOW_POINT_PHONG:
+			return "gles_d3_interaction_shadow_point_phong";
+		case GLESD3_PROGRAM_FILL_LIGHT:
+			return "gles_d3_filllight";
 		default:
 			return "unknown";
 	}
