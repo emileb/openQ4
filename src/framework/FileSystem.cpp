@@ -1662,6 +1662,14 @@ private:
 	int						looseDirectoryChecks;	// directory stats performed
 	int						looseDirectorySkips;	// loose opens avoided
 
+	// Case-recovery memo for case-sensitive filesystems, keyed like the one
+	// above: does this directory exist on disk under any spelling.
+	std::mutex				caseRecoveryLock;
+	std::unordered_map<std::string, bool> caseRecoveryDirectoryExists;
+	bool					CaseRecoveryParentMissing( const char *fileName );
+	bool					CaseRecoveryDirectoryExistsLocked( const idStr &osDirectory );
+	void					ForgetCaseRecoveryDirectories( bool missingOnly );
+
 	int						gamePakForOS[ MAX_GAME_OS ];
 
 	idDEntry				dir_cache[ MAX_CACHED_DIRS ]; // fifo
@@ -1959,6 +1967,73 @@ void idFileSystemLocal::SetLooseDirectoryCacheActive( bool active ) {
 	looseDirectoryChecks = 0;
 	looseDirectorySkips = 0;
 	looseDirectoryCacheActive = active && fs_cacheLooseDirectories.GetBool() && !fs_caseSensitiveOS.GetBool();
+	ForgetCaseRecoveryDirectories( false );
+}
+
+/*
+===========
+idFileSystemLocal::CaseRecoveryParentMissing
+
+On a case-sensitive filesystem every miss in OpenOSFile -- the normal result
+for an asset that lives in a pk4 -- enumerates the parent directories to look
+for another spelling, once per search path. On a Quake 4 level that was most
+of a 30 second load. This remembers, per directory, whether it exists under
+any spelling, so the enumeration happens once per directory instead of once
+per asset. A missing ancestor settles the whole subtree.
+
+The answer comes from the same case-insensitive resolution OpenOSFile uses,
+so a directory spelled with different case still counts as present and its
+files are still recovered.
+===========
+*/
+bool idFileSystemLocal::CaseRecoveryDirectoryExistsLocked( const idStr &osDirectory ) {
+	std::string key;
+	key.reserve( osDirectory.Length() );
+	FS_AppendLooseDirectoryKey( key, osDirectory.c_str(), osDirectory.Length() );
+	const auto found = caseRecoveryDirectoryExists.find( key );
+	if ( found != caseRecoveryDirectoryExists.end() ) {
+		return found->second;
+	}
+
+	idStr parent = osDirectory;
+	parent.StripFilename();
+	parent.StripTrailing( PATHSEPERATOR_CHAR );
+	bool exists;
+	if ( parent.Length() > 1 && parent.Length() < osDirectory.Length() && !CaseRecoveryDirectoryExistsLocked( parent ) ) {
+		exists = false;
+	} else {
+		idStr resolved;
+		exists = FS_IsOSDirectory( osDirectory.c_str() ) || ResolveCaseInsensitiveOSPath( osDirectory.c_str(), resolved, false );
+	}
+
+	// bounded: a long session visiting many maps must not grow this forever
+	if ( caseRecoveryDirectoryExists.size() >= 8192 ) {
+		caseRecoveryDirectoryExists.clear();
+	}
+	caseRecoveryDirectoryExists.emplace( key, exists );
+	return exists;
+}
+
+bool idFileSystemLocal::CaseRecoveryParentMissing( const char *fileName ) {
+	idStr parent = fileName;
+	parent.StripFilename();
+	parent.StripTrailing( PATHSEPERATOR_CHAR );
+	if ( parent.Length() <= 1 ) {
+		return false;
+	}
+	std::lock_guard<std::mutex> lock( caseRecoveryLock );
+	return !CaseRecoveryDirectoryExistsLocked( parent );
+}
+
+void idFileSystemLocal::ForgetCaseRecoveryDirectories( bool missingOnly ) {
+	std::lock_guard<std::mutex> lock( caseRecoveryLock );
+	if ( !missingOnly ) {
+		caseRecoveryDirectoryExists.clear();
+		return;
+	}
+	for ( auto entry = caseRecoveryDirectoryExists.begin(); entry != caseRecoveryDirectoryExists.end(); ) {
+		entry = entry->second ? std::next( entry ) : caseRecoveryDirectoryExists.erase( entry );
+	}
 }
 
 bool idFileSystemLocal::LooseDirectoryMissingLocked( const std::string &key, const std::string &osPath ) {
@@ -2241,6 +2316,10 @@ FILE *idFileSystemLocal::OpenOSFile( const char *fileName, const char *mode, idS
 #endif
 	fp = fopen( fileName, mode );
 	if ( !fp && fs_caseSensitiveOS.GetBool() ) {
+		// nothing to recover under a directory absent in every spelling
+		if ( CaseRecoveryParentMissing( fileName ) ) {
+			return NULL;
+		}
 		idStr resolvedFileName;
 		if ( ResolveCaseInsensitiveOSPath( fileName, resolvedFileName, true ) ) {
 			fp = fopen( resolvedFileName, mode );
@@ -2362,7 +2441,7 @@ void idFileSystemLocal::CreateOSPath( const char *OSPath ) {
 			entry = entry->second ? std::next( entry ) : looseDirectoryExists.erase( entry );
 		}
 	}
-
+	ForgetCaseRecoveryDirectories( true );
 }
 
 /*
