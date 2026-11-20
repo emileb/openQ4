@@ -601,9 +601,19 @@ bool RB_ShadowMapTextureBindings( rendererShadowTextureBindings_t &bindings ) {
 }
 
 void RB_ShutdownScenePostProcess( void ) { }
-// gles_d3's own maps; harmless when none were ever created
+// runs before every context teardown: all of gles_d3's GL objects go, not only its maps
 void RB_ShutdownShadowMapResources( void ) {
-	RB_GLESD3_ShutdownShadowMaps();
+	RB_GLESD3_ShutdownResources();
+	if ( rb_glesResolutionScaleFbo != 0 ) {
+		glDeleteFramebuffers( 1, &rb_glesResolutionScaleFbo );
+		rb_glesResolutionScaleFbo = 0;
+	}
+	if ( rb_glesResolutionScaleColor != 0 ) {
+		glDeleteRenderbuffers( 1, &rb_glesResolutionScaleColor );
+		rb_glesResolutionScaleColor = 0;
+	}
+	rb_glesResolutionScaleWidth = 0;
+	rb_glesResolutionScaleHeight = 0;
 }
 
 void RB_ResetARB2InteractionHandoffBreadcrumb( void ) { }

@@ -193,6 +193,7 @@ typedef enum {
 
 void	RB_GLESD3_RenderShadowMaps( void );
 void	RB_GLESD3_ShutdownShadowMaps( void );
+void	RB_GLESD3_ShutdownResources( void );
 glesD3ShadowPassMode_t	RB_GLESD3_ShadowMapPassMode( const viewLight_t *vLight, bool globalPass );
 struct glesProgram_s *	RB_GLESD3_ShadowMapBeginPass( const viewLight_t *vLight, bool globalPass );
 void	RB_GLESD3_ShadowMapEndPass( void );

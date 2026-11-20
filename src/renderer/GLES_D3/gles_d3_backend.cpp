@@ -413,6 +413,30 @@ bool RB_GLESD3_EnsureResources( void ) {
 
 /*
 ====================
+RB_GLESD3_ShutdownResources
+
+Before the context goes (vid_restart, reloadEngine), so the next one rebuilds
+programs and buffers instead of drawing with names from the old context.
+====================
+*/
+void RB_GLESD3_ShutdownResources( void ) {
+	RB_GLESD3_ShutdownShadowMaps();
+	R_GLESD3_Programs_Shutdown();
+	R_GLESD3_Draw_Shutdown();
+	if ( rb_glesD3TestVbo != 0 ) {
+		glDeleteBuffers( 1, &rb_glesD3TestVbo );
+		rb_glesD3TestVbo = 0;
+	}
+	if ( rb_glesD3TestIbo != 0 ) {
+		glDeleteBuffers( 1, &rb_glesD3TestIbo );
+		rb_glesD3TestIbo = 0;
+	}
+	rb_glesD3ResourcesReady = false;
+	rb_glesD3ResourcesFailed = false;
+}
+
+/*
+====================
 RB_GLESD3_DrawTestTriangle
 
 World-space vertices built each frame from the view origin and axis, so the
