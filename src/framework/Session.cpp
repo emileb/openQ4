@@ -2367,49 +2367,6 @@ static void Session_IAmTheDuke_f( const idCmdArgs &args ) {
 }
 #endif
 
-static void Session_ReplicateColumnIntoRect( byte *dest, int destWidth, int destHeight,
-	int sourceX, int rectX, int rectY, int rectWidth, int rectHeight ) {
-	if ( dest == NULL || destWidth <= 0 || destHeight <= 0 || rectWidth <= 0 || rectHeight <= 0 ) {
-		return;
-	}
-
-	sourceX = idMath::ClampInt( 0, destWidth - 1, sourceX );
-	rectX = idMath::ClampInt( 0, destWidth, rectX );
-	rectY = idMath::ClampInt( 0, destHeight, rectY );
-	rectWidth = idMath::ClampInt( 0, destWidth - rectX, rectWidth );
-	rectHeight = idMath::ClampInt( 0, destHeight - rectY, rectHeight );
-
-	for ( int y = 0; y < rectHeight; y++ ) {
-		const byte *sourcePixel = dest + ( ( rectY + y ) * destWidth + sourceX ) * 4;
-		byte *destPixel = dest + ( ( rectY + y ) * destWidth + rectX ) * 4;
-		for ( int x = 0; x < rectWidth; x++, destPixel += 4 ) {
-			destPixel[ 0 ] = sourcePixel[ 0 ];
-			destPixel[ 1 ] = sourcePixel[ 1 ];
-			destPixel[ 2 ] = sourcePixel[ 2 ];
-			destPixel[ 3 ] = sourcePixel[ 3 ];
-		}
-	}
-}
-
-static void Session_ReplicateRowIntoRect( byte *dest, int destWidth, int destHeight,
-	int sourceY, int rectX, int rectY, int rectWidth, int rectHeight ) {
-	if ( dest == NULL || destWidth <= 0 || destHeight <= 0 || rectWidth <= 0 || rectHeight <= 0 ) {
-		return;
-	}
-
-	sourceY = idMath::ClampInt( 0, destHeight - 1, sourceY );
-	rectX = idMath::ClampInt( 0, destWidth, rectX );
-	rectY = idMath::ClampInt( 0, destHeight, rectY );
-	rectWidth = idMath::ClampInt( 0, destWidth - rectX, rectWidth );
-	rectHeight = idMath::ClampInt( 0, destHeight - rectY, rectHeight );
-
-	for ( int y = 0; y < rectHeight; y++ ) {
-		byte *destRow = dest + ( ( rectY + y ) * destWidth + rectX ) * 4;
-		const byte *sourceRow = dest + ( sourceY * destWidth + rectX ) * 4;
-		memcpy( destRow, sourceRow, rectWidth * 4 );
-	}
-}
-
 static bool Session_GetLoadingCanvasExpansion( float &windowAspect, bool &expandHorizontally, bool &expandVertically,
 	int &viewportPixelWidth, int &viewportPixelHeight ) {
 	windowAspect = static_cast<float>( SCREEN_WIDTH ) / static_cast<float>( SCREEN_HEIGHT );
@@ -2630,6 +2587,7 @@ static bool Session_PrepareExpandedLoadingBackground( const idStr &backgroundPat
 		centerY = ( outputHeight - centerDisplayHeight ) / 2;
 	}
 
+	// sides without a matching _left/_right/_top/_bottom image stay black, not smeared edge pixels
 	idTempArray<byte> composite( outputWidth * outputHeight * 4 );
 	memset( composite.Ptr(), 0, outputWidth * outputHeight * 4 );
 
@@ -2659,7 +2617,6 @@ static bool Session_PrepareExpandedLoadingBackground( const idStr &backgroundPat
 		const int rightWidthPixels = outputWidth - centerX - centerDisplayWidth;
 
 		if ( leftWidthPixels > 0 ) {
-			Session_ReplicateColumnIntoRect( composite.Ptr(), outputWidth, outputHeight, centerX, 0, 0, leftWidthPixels, outputHeight );
 			if ( hasLeft && leftPic != NULL ) {
 				const int cropWidth = Max( 1, idMath::Ftoi( leftWidth * ( static_cast<float>( leftWidthPixels ) / static_cast<float>( centerDisplayWidth ) ) + 0.5f ) );
 				byte *leftResampled = Session_CreateResampledImageRegion( leftPic, leftWidth, leftHeight,
@@ -2672,8 +2629,6 @@ static bool Session_PrepareExpandedLoadingBackground( const idStr &backgroundPat
 		}
 
 		if ( rightWidthPixels > 0 ) {
-			Session_ReplicateColumnIntoRect( composite.Ptr(), outputWidth, outputHeight, centerX + centerDisplayWidth - 1,
-				centerX + centerDisplayWidth, 0, rightWidthPixels, outputHeight );
 			if ( hasRight && rightPic != NULL ) {
 				const int cropWidth = Max( 1, idMath::Ftoi( rightWidth * ( static_cast<float>( rightWidthPixels ) / static_cast<float>( centerDisplayWidth ) ) + 0.5f ) );
 				byte *rightResampled = Session_CreateResampledImageRegion( rightPic, rightWidth, rightHeight,
@@ -2690,7 +2645,6 @@ static bool Session_PrepareExpandedLoadingBackground( const idStr &backgroundPat
 		const int bottomHeightPixels = outputHeight - centerY - centerDisplayHeight;
 
 		if ( topHeightPixels > 0 ) {
-			Session_ReplicateRowIntoRect( composite.Ptr(), outputWidth, outputHeight, centerY, 0, 0, outputWidth, topHeightPixels );
 			if ( hasTop && topPic != NULL ) {
 				const int cropHeight = Max( 1, idMath::Ftoi( topHeight * ( static_cast<float>( topHeightPixels ) / static_cast<float>( centerDisplayHeight ) ) + 0.5f ) );
 				byte *topResampled = Session_CreateResampledImageRegion( topPic, topWidth, topHeight,
@@ -2703,8 +2657,6 @@ static bool Session_PrepareExpandedLoadingBackground( const idStr &backgroundPat
 		}
 
 		if ( bottomHeightPixels > 0 ) {
-			Session_ReplicateRowIntoRect( composite.Ptr(), outputWidth, outputHeight, centerY + centerDisplayHeight - 1,
-				0, centerY + centerDisplayHeight, outputWidth, bottomHeightPixels );
 			if ( hasBottom && bottomPic != NULL ) {
 				const int cropHeight = Max( 1, idMath::Ftoi( bottomHeight * ( static_cast<float>( bottomHeightPixels ) / static_cast<float>( centerDisplayHeight ) ) + 0.5f ) );
 				byte *bottomResampled = Session_CreateResampledImageRegion( bottomPic, bottomWidth, bottomHeight,
