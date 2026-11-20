@@ -2602,12 +2602,12 @@ private:
 	bool failed;
 };
 
-static bool Common_SettingsSaveDirectory( std::string& directory, std::string& error ) {
+static bool Common_SettingsSaveDirectory( std::string& directory, std::string& error, const char *rootCVar = "fs_savepath" ) {
 	if ( fileSystem == NULL || !fileSystem->IsInitialized() || cvarSystem == NULL ) {
 		error = "configuration filesystem is unavailable";
 		return false;
 	}
-	std::string root = cvarSystem->GetCVarString( "fs_savepath" );
+	std::string root = cvarSystem->GetCVarString( rootCVar );
 	if ( root.empty() || root.size() > 32768 ) {
 		error = "configuration save root is empty or oversized";
 		return false;
@@ -2654,7 +2654,12 @@ static void Common_CreateSettingsParent( const std::string& path ) {
 
 bool Common_SettingsPersistencePaths( std::string& journal, std::string& lock, std::string& error ) {
 	std::string directory;
+#if defined( __ANDROID__ ) && defined( OPENQ4_SIGMATOUCH )
+	// recovery journal and lock are scratch files: the host keeps those in its cache, not user files
+	if ( !Common_SettingsSaveDirectory( directory, error, "fs_cachepath" ) ) return false;
+#else
 	if ( !Common_SettingsSaveDirectory( directory, error ) ) return false;
+#endif
 	const std::string resolvedJournal = directory + "ui-settings-recovery.dat";
 	const std::string resolvedLock = directory + ".settings-recovery.lock";
 	Common_CreateSettingsParent( resolvedJournal );
@@ -2705,7 +2710,14 @@ bool idCommonLocal::WriteConfigToFileChecked( const char *filename, bool coordin
 	}
 	// Derive the destination from the same root snapshot used by the lease,
 	// rather than re-reading a CVar or consulting the active mod's search path.
+#if defined( __ANDROID__ ) && defined( OPENQ4_SIGMATOUCH )
+	// the journal is in the cache there, the configuration stays in the save path
+	std::string saveDirectory;
+	if ( !Common_SettingsSaveDirectory( saveDirectory, error ) ) return false;
+	const std::string destination = saveDirectory + filename;
+#else
 	const std::string destination = journal.substr( 0, journal.find_last_of( '/' ) + 1 ) + filename;
+#endif
 	idCheckedConfigMemory memory( "configuration" );
 #ifdef ID_WRITE_VERSION
 	if ( config_compressor == NULL ) { error = "configuration version compressor is unavailable"; return false; }
@@ -2781,7 +2793,20 @@ void idCommonLocal::WriteConfiguration( void ) {
 		return;
 	}
 	std::string error;
+#if defined( __ANDROID__ ) && defined( OPENQ4_SIGMATOUCH )
+	// a failing write would retry every frame against slow storage: report it once and back off
+	static int nextConfigAttempt = 0;
+	static bool configFailureReported = false;
+	if ( Sys_Milliseconds() < nextConfigAttempt ) return;
+	if ( !WriteConfigToFileChecked( CONFIG_FILE, false, error ) ) {
+		nextConfigAttempt = Sys_Milliseconds() + 5000;
+		if ( !configFailureReported ) common->Warning( "Could not save %s: %s", CONFIG_FILE, error.c_str() );
+		configFailureReported = true;
+		return;
+	}
+#else
 	if ( !WriteConfigToFileChecked( CONFIG_FILE, false, error ) ) return;
+#endif
 	cvarSystem->ClearModifiedFlags( CVAR_ARCHIVE );
 	session->WriteCDKey();
 }

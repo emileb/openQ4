@@ -26,6 +26,43 @@
 #endif
 #endif
 
+#if defined(__ANDROID__) && defined(OPENQ4_SIGMATOUCH)
+// The host's SAF storage (SAFFAL) only intercepts path calls, so directory-relative calls go by full path
+#include <mutex>
+#include <string>
+#include <unordered_map>
+namespace openq4 { namespace durable_saf {
+std::mutex mutex;
+std::unordered_map<int,std::string> directories;
+void Remember(int fd, const std::string& path) {
+    std::lock_guard<std::mutex> lock(mutex);
+    directories[fd] = path;
+}
+std::string At(int fd, const char* name) {
+    std::lock_guard<std::mutex> lock(mutex);
+    const auto it = directories.find(fd);
+    return (it != directories.end() ? it->second : std::string(".")) + "/" + name;
+}
+int OpenAt(int fd, const char* name, int flags, mode_t mode = 0) { return ::open(At(fd,name).c_str(),flags & ~O_NOFOLLOW,mode); }
+int StatAt(int fd, const char* name, struct stat* info, int) { return ::stat(At(fd,name).c_str(),info); }
+int RenameAt(int from, const char* a, int to, const char* b) { return ::rename(At(from,a).c_str(),At(to,b).c_str()); }
+// the temp is already gone when LinkAt moved it, which is the same outcome
+int UnlinkAt(int fd, const char* name, int) { return ::remove(At(fd,name).c_str()) == 0 || errno == ENOENT ? 0 : -1; }
+// no hard links on SAF: refuse an occupied name, then move the temp into place
+int LinkAt(int from, const char* a, int to, const char* b, int) {
+    struct stat info;
+    const std::string target = At(to,b);
+    if (::stat(target.c_str(),&info) == 0) { errno = EEXIST; return -1; }
+    return ::rename(At(from,a).c_str(),target.c_str());
+}
+}}
+#define openat openq4::durable_saf::OpenAt
+#define fstatat openq4::durable_saf::StatAt
+#define renameat openq4::durable_saf::RenameAt
+#define unlinkat openq4::durable_saf::UnlinkAt
+#define linkat openq4::durable_saf::LinkAt
+#endif
+
 namespace openq4 {
 namespace durable_detail {
 
@@ -255,6 +292,10 @@ bool Sync(Native file, Point point, std::string& error) {
 #ifdef _WIN32
     if (!FlushFileBuffers(file)) return Error(error,"File flush failed",GetLastError());
 #else
+#if defined(__ANDROID__) && defined(OPENQ4_SIGMATOUCH)
+    // a SAF directory cannot be synced; the provider commits the rename itself
+    if (point == Point::MetadataSync) return true;
+#endif
     int result;
     do { result = fsync(file); } while (result != 0 && errno == EINTR);
     if (result != 0) return Error(error,point == Point::MetadataSync ?
@@ -283,12 +324,23 @@ std::string TempLeaf() {
 
 #ifndef _WIN32
 bool OpenParent(const Path& path, Handle& parent, std::string& error, bool* missing = nullptr) {
+#if defined(__ANDROID__) && defined(OPENQ4_SIGMATOUCH)
+    // only a token for the path-based calls above; SAF directories cannot be opened
+    struct stat info;
+    if (stat(path.parent.c_str(),&info) != 0) parent.value = Invalid;
+    else if (!S_ISDIR(info.st_mode)) { parent.value = Invalid; errno = ENOTDIR; }
+    else parent.value = open("/dev/null",O_RDONLY | O_CLOEXEC);
+#else
     parent.value = open(path.parent.c_str(),O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+#endif
     if (parent.value == Invalid) {
         const auto code = errno;
         if (missing) *missing = code == ENOENT;
         return Error(error,"Cannot open parent directory",code);
     }
+#if defined(__ANDROID__) && defined(OPENQ4_SIGMATOUCH)
+    durable_saf::Remember(parent.value,path.parent);
+#endif
     return true;
 }
 #endif
@@ -668,6 +720,10 @@ bool DurableFileLease::TryAcquire(const std::string& path, std::string& error) {
 #ifndef _WIN32
         int result;
         do { result = flock(candidate->file.value,LOCK_EX | LOCK_NB); } while (result != 0 && errno == EINTR);
+#if defined(__ANDROID__) && defined(OPENQ4_SIGMATOUCH)
+        // SAF-backed storage cannot lock (ENOSYS), and the host runs a single game process
+        if (result != 0 && (errno == ENOSYS || errno == EOPNOTSUPP)) result = 0;
+#endif
         if (result != 0) return Error(error,"Durable file lease is busy or unsupported",errno);
 #endif
         impl = std::move(candidate);

@@ -1245,8 +1245,17 @@ static uLong unzlocal_SearchCentralDir(FILE *fin)
 extern unzFile unzReOpen (const char* path, unzFile file)
 {
 	unz_s *s;
-	FILE * fin;
+	FILE * fin = NULL;
 
+#if defined( __ANDROID__ ) && defined( OPENQ4_SIGMATOUCH )
+	// every SAF open is a provider round trip: reopen the pak's own descriptor, with its own offset
+	if ( file != NULL && ((unz_s*)file)->file != NULL ) {
+		char procPath[64];
+		idStr::snPrintf( procPath, sizeof( procPath ), "/proc/self/fd/%d", fileno( (FILE *)((unz_s*)file)->file ) );
+		fin = fopen( procPath, "rb" );
+	}
+	if (fin==NULL)
+#endif
     fin=fopen(path,"rb");
 	if (fin==NULL)
 		return NULL;
