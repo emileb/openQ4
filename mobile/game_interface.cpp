@@ -203,7 +203,16 @@ static bool dismissedFatalConsole()
 extern "C" void Quake4_ClearTouchInput(void)
 {
     std::lock_guard<std::mutex> lock(inputMutex);
+    // Commands are not held input: keep them, the in-game options dialog sends its own before focus returns
+    static TouchEvent commands[EVENT_QUEUE_SIZE];
+    int commandCount = 0;
+    for (int i = eventTail; i != eventHead; i = (i + 1) % EVENT_QUEUE_SIZE)
+        if (eventQueue[i].type == EV_COMMAND)
+            commands[commandCount++] = eventQueue[i];
     clearPendingInput();
+    for (int i = 0; i < commandCount; ++i)
+        eventQueue[i] = commands[i];
+    eventHead = commandCount;
     resetPending = true;
 }
 
