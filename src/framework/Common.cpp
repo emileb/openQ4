@@ -2226,6 +2226,28 @@ static bool Common_IsRetailGameDirFile( const char *relativePath ) {
 	return directory.Icmp( BASE_GAMEDIR ) == 0;
 }
 
+#if defined( __ANDROID__ ) && defined( OPENQ4_SIGMATOUCH )
+// The Awakening download's q4xbase/autoexec.cfg holds desktop settings that would persist; a player's own under the save path still runs
+static bool Common_IsAwakeningDataAutoexec( void ) {
+	idFile *file = fileSystem->OpenFileRead( "autoexec.cfg" );
+	if ( file == NULL ) {
+		return false;
+	}
+	idStr path = file->GetFullPath();
+	fileSystem->CloseFile( file );
+	path.BackSlashesToSlashes();
+	idStr directory = path;
+	directory.StripFilename();
+	directory.StripPath();
+	if ( directory.Icmp( "q4xbase" ) != 0 ) {
+		return false;
+	}
+	idStr savePath = cvarSystem->GetCVarString( "fs_savepath" );
+	savePath.BackSlashesToSlashes();
+	return savePath.IsEmpty() || idStr::Icmpn( path, savePath, savePath.Length() ) != 0;
+}
+#endif
+
 void idCommonLocal::StartupVariable( const char *match, bool once ) {
 	int			i;
 	const char *s;
@@ -7721,6 +7743,11 @@ void idCommonLocal::InitGame( void ) {
 		cmdSystem->ExecuteCommandBuffer();
 		savedLanguage = cvarSystem->GetCVarString( "sys_lang" );
 	}
+#if defined( __ANDROID__ ) && defined( OPENQ4_SIGMATOUCH )
+	if ( Common_IsAwakeningDataAutoexec() ) {
+		Printf( "Skipping q4xbase/autoexec.cfg from the game data.\n" );
+	} else
+#endif
 	if ( fileSystem->ReadFile( "autoexec.cfg", NULL ) >= 0 ) {
 		cmdSystem->BufferCommandText( CMD_EXEC_APPEND, "exec autoexec.cfg\n" );
 	}
