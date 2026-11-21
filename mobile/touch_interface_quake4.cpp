@@ -59,32 +59,32 @@ void TouchInterface::mouseMove(int action, float x, float y, float mouse_x, floa
 void TouchInterface::addGameControls(touchcontrols::TouchControls *tc)
 {
     tc->setAlpha(touchSettings.alpha);
-    tc->addControl(new touchcontrols::Button("back", touchcontrols::RectF(0, 0, 2, 2), "back_button", KEY_BACK_BUTTON, false, false, "#str_43000"));
-    tc->addControl(new touchcontrols::Button("attack", touchcontrols::RectF(20, 7, 23, 10), "shoot", KEY_SHOOT, false, false, "#str_200114"));
-    tc->addControl(new touchcontrols::Button("attack2", touchcontrols::RectF(3, 5, 6, 8), "shoot", KEY_SHOOT, false, true, "#str_200114"));
+    tc->addControl(new touchcontrols::Button("back", touchcontrols::RectF(0, 0, 2, 2), "back_button", KEY_BACK_BUTTON, false, false, "Show menu"));
+    tc->addControl(new touchcontrols::Button("attack", touchcontrols::RectF(20, 7, 23, 10), "shoot", KEY_SHOOT, false, false, "Attack!"));
+    tc->addControl(new touchcontrols::Button("attack2", touchcontrols::RectF(3, 5, 6, 8), "shoot", KEY_SHOOT, false, true, "Attack! (duplicate)"));
 
-    tc->addControl(new touchcontrols::Button("zoom", touchcontrols::RectF(21, 3, 23, 5), "binocular", PORT_ACT_ZOOM_IN, false, false, "#str_200122"));
-    tc->addControl(new touchcontrols::Button("reload", touchcontrols::RectF(0, 5, 3, 7), "reload", PORT_ACT_RELOAD, false, false, "#str_200117"));
-    tc->addControl(new touchcontrols::Button("flashlight", touchcontrols::RectF(19, 3, 21, 5), "flashlight", PORT_ACT_FLASH_LIGHT, false, false, "#str_200315"));
-    tc->addControl(new touchcontrols::Button("objectives", touchcontrols::RectF(16, 0, 18, 2), "notebook", PORT_ACT_HELPCOMP, false, false, "#str_200131"));
+    tc->addControl(new touchcontrols::Button("zoom", touchcontrols::RectF(21, 3, 23, 5), "binocular", PORT_ACT_ZOOM_IN, false, false, "Zoom"));
+    tc->addControl(new touchcontrols::Button("reload", touchcontrols::RectF(0, 5, 3, 7), "reload", PORT_ACT_RELOAD, false, false, "Reload"));
+    tc->addControl(new touchcontrols::Button("flashlight", touchcontrols::RectF(19, 3, 21, 5), "flashlight", PORT_ACT_FLASH_LIGHT, false, false, "Flashlight"));
+    tc->addControl(new touchcontrols::Button("objectives", touchcontrols::RectF(16, 0, 18, 2), "notebook", PORT_ACT_HELPCOMP, false, false, "Objectives"));
 
-    tc->addControl(new touchcontrols::Button("quick_save", touchcontrols::RectF(24, 0, 26, 2), "save", PORT_ACT_QUICKSAVE, false, false, "#str_43001"));
-    tc->addControl(new touchcontrols::Button("quick_load", touchcontrols::RectF(20, 0, 22, 2), "load", PORT_ACT_QUICKLOAD, false, false, "#str_43002"));
+    tc->addControl(new touchcontrols::Button("quick_save", touchcontrols::RectF(24, 0, 26, 2), "save", PORT_ACT_QUICKSAVE, false, false, "Quick save"));
+    tc->addControl(new touchcontrols::Button("quick_load", touchcontrols::RectF(20, 0, 22, 2), "load", PORT_ACT_QUICKLOAD, false, false, "Quick load"));
 
-    tc->addControl(new touchcontrols::Button("keyboard", touchcontrols::RectF(8, 0, 10, 2), "keyboard", KEY_SHOW_KBRD, false, false, "#str_43003"));
-    tc->addControl(new touchcontrols::Button("gfx_options", touchcontrols::RectF(10, 0, 12, 2), "gfx_options", KEY_SHOW_ENGINE_OPTIONS, false, false, "#str_43012"));
-    tc->addControl(new touchcontrols::Button("show_mouse", touchcontrols::RectF(4, 0, 6, 2), "left_mouse", KEY_USE_MOUSE, false, true, "#str_43004"));
-    tc->addControl(new touchcontrols::Button("console", touchcontrols::RectF(6, 0, 8, 2), "tild", PORT_ACT_CONSOLE, false, true, "#str_43005"));
+    tc->addControl(new touchcontrols::Button("keyboard", touchcontrols::RectF(8, 0, 10, 2), "keyboard", KEY_SHOW_KBRD, false, false, "Show keyboard"));
+    tc->addControl(new touchcontrols::Button("gfx_options", touchcontrols::RectF(10, 0, 12, 2), "gfx_options", KEY_SHOW_ENGINE_OPTIONS, false, false, "Graphics options"));
+    tc->addControl(new touchcontrols::Button("show_mouse", touchcontrols::RectF(4, 0, 6, 2), "left_mouse", KEY_USE_MOUSE, false, true, "Use mouse"));
+    tc->addControl(new touchcontrols::Button("console", touchcontrols::RectF(6, 0, 8, 2), "tild", PORT_ACT_CONSOLE, false, true, "Console"));
 
-    tc->addControl(new touchcontrols::Button("jump", touchcontrols::RectF(24, 3, 26, 5), "jump", PORT_ACT_JUMP, false, false, "#str_200098"));
-    tc->addControl(new touchcontrols::Button("crouch_toggle", touchcontrols::RectF(24, 14, 26, 16), "crouch", PORT_ACT_CROUCH, false, false, "#str_200099"));
+    tc->addControl(new touchcontrols::Button("jump", touchcontrols::RectF(24, 3, 26, 5), "jump", PORT_ACT_JUMP, false, false, "Jump"));
+    tc->addControl(new touchcontrols::Button("crouch_toggle", touchcontrols::RectF(24, 14, 26, 16), "crouch", PORT_ACT_CROUCH, false, false, "Crouch"));
 
-    tc->addControl(new touchcontrols::Button("show_custom", touchcontrols::RectF(0, 7, 2, 9), "custom_show", KEY_SHOW_CUSTOM, false, true, "#str_43006"));
-    tc->addControl(new touchcontrols::Button("show_weapons", touchcontrols::RectF(12, 14, 14, 16), "show_weapons", KEY_SHOW_WEAPONS, false, false, "#str_43007"));
-    tc->addControl(new touchcontrols::Button("next_weapon", touchcontrols::RectF(0, 3, 3, 5), "next_weap", PORT_ACT_NEXT_WEP, false, false, "#str_43008"));
-    tc->addControl(new touchcontrols::Button("prev_weapon", touchcontrols::RectF(0, 7, 3, 9), "prev_weap", PORT_ACT_PREV_WEP, false, false, "#str_43009"));
+    tc->addControl(new touchcontrols::Button("show_custom", touchcontrols::RectF(0, 7, 2, 9), "custom_show", KEY_SHOW_CUSTOM, false, true, "Show custom"));
+    tc->addControl(new touchcontrols::Button("show_weapons", touchcontrols::RectF(12, 14, 14, 16), "show_weapons", KEY_SHOW_WEAPONS, false, false, "Show numbers"));
+    tc->addControl(new touchcontrols::Button("next_weapon", touchcontrols::RectF(0, 3, 3, 5), "next_weap", PORT_ACT_NEXT_WEP, false, false, "Next weapon"));
+    tc->addControl(new touchcontrols::Button("prev_weapon", touchcontrols::RectF(0, 7, 3, 9), "prev_weap", PORT_ACT_PREV_WEP, false, false, "Prev weapon"));
 
-    touchcontrols::ButtonGrid *dpad = new touchcontrols::ButtonGrid("dpad_move", touchcontrols::RectF(6, 3, 12, 7), "", 3, 2, true, "#str_43010");
+    touchcontrols::ButtonGrid *dpad = new touchcontrols::ButtonGrid("dpad_move", touchcontrols::RectF(6, 3, 12, 7), "", 3, 2, true, "Movement btns (WASD)");
 
     dpad->addCell(0, 1, "direction_left", PORT_ACT_MOVE_LEFT);
     dpad->addCell(2, 1, "direction_right", PORT_ACT_MOVE_RIGHT);
@@ -242,8 +242,8 @@ void TouchInterface::createControls(std::string filesPath)
     mouse->setEditable(false);
     tcMouse->addControl(mouse);
     mouse->signal_action.connect(sigc::mem_fun(this, &TouchInterface::mouseMove));
-    tcMouse->addControl(new touchcontrols::Button("back", touchcontrols::RectF(0, 0, 2, 2), "back_button", KEY_BACK_BUTTON, false, false, "#str_41515"));
-    tcMouse->addControl(new touchcontrols::Button("left_button", touchcontrols::RectF(0, 6, 3, 10), "left_mouse", KEY_LEFT_MOUSE, false, false, "#str_43011"));
+    tcMouse->addControl(new touchcontrols::Button("back", touchcontrols::RectF(0, 0, 2, 2), "back_button", KEY_BACK_BUTTON, false, false, "Back"));
+    tcMouse->addControl(new touchcontrols::Button("left_button", touchcontrols::RectF(0, 6, 3, 10), "left_mouse", KEY_LEFT_MOUSE, false, false, "Left click"));
     tcMouse->signal_button.connect(sigc::mem_fun(this, &TouchInterface::mouseButton));
 
     std::string newSettings = (std::string) filesPath + "/touch_settings_" ENGINE_NAME ".xml";
@@ -285,7 +285,6 @@ void TouchInterface::automapButton(int state, int code)
 
 void TouchInterface::newFrame()
 {
-    updateControlLabels();
     touchscreemode_t screenMode = PortableGetScreenMode();
 
     // Hack to show custom buttons while in the menu to bind keys
@@ -306,22 +305,6 @@ void TouchInterface::newFrame()
     updateTouchScreenModeIn(screenMode);
 
     currentScreenMode = screenMode;
-}
-
-void TouchInterface::updateControlLabels()
-{
-    if (labelsLocalized || Quake4_LocalizeString("#str_43000") == NULL)
-        return;
-
-    // Clibs creates these groups before the engine starts. Keep string IDs in
-    // their descriptions until the engine-thread frame callback can resolve
-    // them; no language-dictionary access is safe from the host's init thread.
-    touchcontrols::TouchControls *groups[] = { tcGameMain, tcMouse };
-    for (auto *group : groups)
-        for (auto *control : *group->getControls())
-            if (control->description.compare(0, 5, "#str_") == 0)
-                control->description = Quake4_LocalizeString(control->description.c_str());
-    labelsLocalized = true;
 }
 
 void TouchInterface::newGLContext()

@@ -38,8 +38,6 @@ void Quake4_ClearTouchInput( void );
 void Quake4_ResetTouchState( void );
 // Publish the engine's current screen mode for host/UI-thread readers.
 void Quake4_UpdateTouchScreenMode( void );
-// Engine-thread lookup for touch editor labels; NULL until engine initialization.
-const char *Quake4_LocalizeString( const char *stringId );
 
 /*
 	Everything below is implemented in sys/android/android_sdl3.cpp and posts input on the engine thread only. Quake4_GetScreenMode returns an
